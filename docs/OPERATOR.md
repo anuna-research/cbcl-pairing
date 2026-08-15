@@ -129,6 +129,8 @@ limiter dimensions, logs, capacity, and observed network metadata remain local
 to each deployment.
 
 `tests/relay_process.rs` starts two isolated processes with distinct operator
-keys and exercises both profile labels over the same wire. This is local
-implementer evidence; TEST-017 still requires an integration reviewer and full
-profile-result evidence before its gate can close.
+keys and carries complete agent and credential ceremonies over each: CPace,
+Finished, projected intent, approval, payload, grant, acknowledgement, and
+close. It compares the resulting display/grant state and verifies that logs
+remain application-blind. This is local implementer evidence; the production
+gate still requires the named integration-review disposition.

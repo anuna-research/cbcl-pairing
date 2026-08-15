@@ -181,3 +181,21 @@ fn test_015_periodic_sweep_runs_before_capacity_refusal() {
     ));
     assert_eq!(limiter.snapshot().entry_count, 1);
 }
+
+#[test]
+fn test_017_operator_keys_separate_peer_pseudonyms() {
+    let address = b"198.51.100.42";
+    let mut first = Limiter::new([0x11; 32], config(8)).expect("first operator");
+    let mut second = Limiter::new([0x99; 32], config(8)).expect("second operator");
+    first
+        .check(Operation::Bind, address, 1)
+        .expect("first admission");
+    second
+        .check(Operation::Bind, address, 1)
+        .expect("second admission");
+    let first_key = first.snapshot().dimensions[0].1;
+    let second_key = second.snapshot().dimensions[0].1;
+    assert_ne!(first_key, second_key);
+    assert_eq!(format!("{first_key:?}"), "PeerKey(REDACTED)");
+    assert_eq!(format!("{second_key:?}"), "PeerKey(REDACTED)");
+}
