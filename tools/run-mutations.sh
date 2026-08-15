@@ -15,7 +15,7 @@ run_mutant() {
     log="$scratch/$name.log"
     mkdir -p "$case_dir"
     git -C "$repository" archive --format=tar HEAD | tar -x -C "$case_dir"
-    patch --silent -d "$case_dir" -p1 <"$repository/$patch_file"
+    (cd "$case_dir" && git apply --no-index "$repository/$patch_file")
 
     if ! CARGO_TARGET_DIR="$target" cargo test --locked --no-run \
         --manifest-path "$case_dir/Cargo.toml" --test "$test_target" >"$log" 2>&1
