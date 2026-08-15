@@ -18,9 +18,10 @@ use cbcl_pairing::{
         SyntheticProfile, SYNTHETIC_ACTION, SYNTHETIC_APPLICATION, SYNTHETIC_PAYLOAD,
     },
     wire::{
-        decode_pairing_intent, decode_sealed_plaintext, encode_channel_frame, encode_invitation,
-        encode_pairing_decision, encode_sealed_plaintext, ApplicationPayload, ChannelFrame,
-        Decision, Invitation, Locator, PairingDecision, PairingIntent, SealedPlaintext, Side,
+        decode_pairing_intent, decode_sealed_plaintext, encode_channel_frame, encode_cpace_message,
+        encode_invitation, encode_pairing_decision, encode_sealed_plaintext, ApplicationPayload,
+        ChannelFrame, Decision, Invitation, Locator, PairingDecision, PairingIntent,
+        SealedPlaintext, Side,
     },
 };
 use sha2::{Digest, Sha256};
@@ -84,8 +85,8 @@ fn materials() -> Materials {
     let allocator_isk = cpace::finish(allocator_state, &claimant_message).expect("allocator ISK");
     let claimant_isk = cpace::finish(claimant_state, &allocator_message).expect("claimant ISK");
 
-    let allocator_body = allocator_message.share.to_vec();
-    let claimant_body = claimant_message.share.to_vec();
+    let allocator_body = encode_cpace_message(&allocator_message).expect("allocator message");
+    let claimant_body = encode_cpace_message(&claimant_message).expect("claimant message");
     let allocator_control = build_bootstrap_control(
         &allocator_key,
         BootstrapPerformative::CpaceA,

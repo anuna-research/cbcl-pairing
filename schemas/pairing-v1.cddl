@@ -88,6 +88,13 @@ membership-token = bstr .size 32
 
 cpace-channel-frame = cpace-frame / finished-frame / sealed-frame
 
+cpace-message = [
+  1,
+  0..1,
+  bstr .size 32,
+  bstr .size (1..128)
+]
+
 cpace-frame = {
   "v": 1,
   "kind": "cpace",
@@ -139,4 +146,3 @@ application-payload = {
   "payload-type": tstr .size (1..96),
   "body": bstr .size (1..64512)
 }
-

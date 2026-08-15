@@ -165,7 +165,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/schemas/pairing-v1.cddl"
             ))
             .as_slice(),
-            "841ae4106becd28718028cab50058877d0ab30bd38a7d39c2b224e4a1e63a103",
+            "40184162a0173e4dd9dd27fd40ff2eaae3a23abd371dc39423761c842ccddbf1",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/mailbox.rs")).as_slice(),

@@ -21,6 +21,15 @@ fn bytes(length: usize, fill: u8) -> Value {
     Value::Bytes(vec![fill; length])
 }
 
+fn cpace_message(side: u64, associated_data_length: usize) -> Value {
+    Value::Bytes(encode(&Value::Array(vec![
+        uint(1),
+        uint(side),
+        bytes(32, 2),
+        bytes(associated_data_length, 3),
+    ])))
+}
+
 fn map(entries: Vec<(&str, Value)>) -> Value {
     Value::Map(
         entries
@@ -142,14 +151,14 @@ fn valid_channel_frames() -> Vec<Value> {
             ("kind", text("cpace")),
             ("role", uint(0)),
             ("control", bytes(1, 1)),
-            ("message", bytes(65_536, 2)),
+            ("message", cpace_message(0, 128)),
         ]),
         map(vec![
             ("v", uint(1)),
             ("kind", text("cpace")),
             ("role", uint(1)),
             ("control", bytes(2_048, 1)),
-            ("message", bytes(1, 2)),
+            ("message", cpace_message(1, 1)),
         ]),
         map(vec![
             ("v", uint(1)),

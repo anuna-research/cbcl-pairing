@@ -4,7 +4,10 @@
 //! `draft-irtf-cfrg-cpace-21`. Callers provide the entropy and protocol
 //! context; this pure core owns neither a random-number generator nor I/O.
 
-use crate::wire::Side;
+use crate::{
+    context::PairingContext,
+    wire::{Invitation, Side},
+};
 use sha2::{Digest, Sha512};
 use std::fmt;
 use subtle::ConstantTimeEq;
@@ -26,16 +29,7 @@ pub const CPACE_DSI: &[u8] = b"CPace255";
 /// Domain-separation input for the CPace255 intermediate session key.
 pub const CPACE_ISK_DSI: &[u8] = b"CPace255_ISK";
 
-/// One party's CPace share and associated data.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CpaceMessage {
-    /// The protocol side which emitted this message.
-    pub side: Side,
-    /// Encoded Curve25519 Montgomery u-coordinate.
-    pub share: [u8; 32],
-    /// Side-specific associated data bound into the transcript.
-    pub associated_data: Vec<u8>,
-}
+pub use crate::wire::CpaceMessage;
 
 /// A completed 64-byte CPace intermediate session key.
 pub struct IntermediateSessionKey(Zeroizing<[u8; 64]>);
@@ -60,6 +54,7 @@ pub struct CpaceState {
     scalar: Zeroizing<[u8; 32]>,
     local_message: CpaceMessage,
     sid: Vec<u8>,
+    expected_peer_associated_data: Option<Vec<u8>>,
 }
 
 impl fmt::Debug for CpaceState {
@@ -83,6 +78,10 @@ pub enum CpaceError {
     InvalidPeerPoint,
     /// A combined encoding length overflowed the current platform.
     LengthOverflow,
+    /// The SPEC-072 invitation context was invalid.
+    InvalidContext,
+    /// The peer did not carry its exact deterministic associated data.
+    AssociatedData,
 }
 
 impl fmt::Display for CpaceError {
@@ -172,7 +171,35 @@ pub fn start(
         scalar: Zeroizing::new(fresh_scalar),
         local_message: message.clone(),
         sid: session_id.to_vec(),
+        expected_peer_associated_data: None,
     };
+    Ok((state, message))
+}
+
+/// Begin CPace using only the normative SPEC-072 invitation context and a
+/// caller-supplied fresh scalar.
+pub fn start_pairing(
+    side: Side,
+    invitation: &Invitation,
+    mailbox_id: [u8; 32],
+    fresh_scalar: [u8; 32],
+) -> Result<(CpaceState, CpaceMessage), CpaceError> {
+    let context =
+        PairingContext::derive(invitation, mailbox_id).map_err(|_| CpaceError::InvalidContext)?;
+    let local_ad = context.associated_data(side);
+    let peer_ad = context.associated_data(match side {
+        Side::Allocator => Side::Claimant,
+        Side::Claimant => Side::Allocator,
+    });
+    let (mut state, message) = start(
+        side,
+        &invitation.secret,
+        context.channel_identifier(),
+        context.session_id(),
+        local_ad,
+        fresh_scalar,
+    )?;
+    state.expected_peer_associated_data = Some(peer_ad.to_vec());
     Ok((state, message))
 }
 
@@ -183,6 +210,13 @@ pub fn finish(
 ) -> Result<IntermediateSessionKey, CpaceError> {
     if state.side == peer_message.side {
         return Err(CpaceError::SameSide);
+    }
+    if state
+        .expected_peer_associated_data
+        .as_ref()
+        .is_some_and(|expected| expected != &peer_message.associated_data)
+    {
+        return Err(CpaceError::AssociatedData);
     }
 
     let shared_point = Zeroizing::new(x25519_scalar_mult_vfy(*state.scalar, peer_message.share)?);

@@ -154,6 +154,17 @@ pub enum Direction {
     ClaimantToAllocator,
 }
 
+/// Fully recognised CPace share and the sender's exact associated data.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CpaceMessage {
+    /// Fixed allocator or claimant side.
+    pub side: Side,
+    /// Encoded Curve25519 Montgomery u-coordinate.
+    pub share: [u8; 32],
+    /// Deterministic `pairing-ad` bytes for this side.
+    pub associated_data: Vec<u8>,
+}
+
 /// Fully recognised CPace, Finished, or sealed channel frame.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChannelFrame {
@@ -815,11 +826,18 @@ pub fn decode_channel_frame(input: &[u8]) -> Result<ChannelFrame, RecognitionErr
     let value = recognise_value(input, "cpace-channel-frame")?;
     let entries = map_entries(&value)?;
     match text_value(field(entries, "kind")?)? {
-        "cpace" => Ok(ChannelFrame::Cpace {
-            side: side(field(entries, "role")?)?,
-            control: bytes_value(field(entries, "control")?)?.to_vec(),
-            message: bytes_value(field(entries, "message")?)?.to_vec(),
-        }),
+        "cpace" => {
+            let outer_side = side(field(entries, "role")?)?;
+            let message = bytes_value(field(entries, "message")?)?.to_vec();
+            if decode_cpace_message(&message)?.side != outer_side {
+                return Err(RecognitionError::TypedValue);
+            }
+            Ok(ChannelFrame::Cpace {
+                side: outer_side,
+                control: bytes_value(field(entries, "control")?)?.to_vec(),
+                message,
+            })
+        }
         "finished" => Ok(ChannelFrame::Finished {
             side: side(field(entries, "role")?)?,
             control: bytes_value(field(entries, "control")?)?.to_vec(),
@@ -873,6 +891,34 @@ pub fn encode_channel_frame(value: &ChannelFrame) -> Result<Vec<u8>, Recognition
     };
     let encoded = deterministic_bytes(&value)?;
     decode_channel_frame(&encoded)?;
+    Ok(encoded)
+}
+
+/// Recognise one deterministic nested CPace message.
+pub fn decode_cpace_message(input: &[u8]) -> Result<CpaceMessage, RecognitionError> {
+    let value = recognise_value(input, "cpace-message")?;
+    let Value::Array(parts) = value else {
+        return Err(RecognitionError::TypedValue);
+    };
+    if parts.len() != 4 || uint_value(&parts[0])? != 1 {
+        return Err(RecognitionError::TypedValue);
+    }
+    Ok(CpaceMessage {
+        side: side(&parts[1])?,
+        share: fixed_bytes(&parts[2])?,
+        associated_data: bytes_value(&parts[3])?.to_vec(),
+    })
+}
+
+/// Encode one nested CPace message as deterministic CBOR.
+pub fn encode_cpace_message(value: &CpaceMessage) -> Result<Vec<u8>, RecognitionError> {
+    let encoded = deterministic_bytes(&Value::Array(vec![
+        Value::Integer(1.into()),
+        encoded_side(value.side),
+        Value::Bytes(value.share.to_vec()),
+        Value::Bytes(value.associated_data.clone()),
+    ]))?;
+    decode_cpace_message(&encoded)?;
     Ok(encoded)
 }
 
