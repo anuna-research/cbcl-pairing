@@ -50,6 +50,7 @@ pub enum ComponentStatus {
 pub fn component_status(name: &str) -> ComponentStatus {
     match name {
         "canonical-recognisers" => ComponentStatus::Implemented,
+        "mailbox-core" => ComponentStatus::Implemented,
         _ => ComponentStatus::NotImplemented,
     }
 }
