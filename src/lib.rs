@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod channel;
 pub mod cpace;
 pub mod limiter;
 pub mod mailbox;
