@@ -420,7 +420,7 @@ fn test_022_sibling_decisions_each_have_a_valid_causal_verdict() {
 
 #[test]
 fn test_020_session_sender_recipient_predecessor_and_body_mutants_fail() {
-    let (mut monitor, allocator, _claimant, allocator_id, claimant_id) =
+    let (mut monitor, allocator, claimant, allocator_id, claimant_id) =
         opened_session(PairingRole::Claimant);
     let ceremony = ceremony_id(INVITATION);
     let body = b"intent";
@@ -454,6 +454,23 @@ fn test_020_session_sender_recipient_predecessor_and_body_mutants_fail() {
         monitor
             .admit(SessionPerformative::Intent, &bad_recipient, body)
             .expect("role verdict")
+            .verdict(),
+        ProtocolVerdict::Violation
+    );
+
+    let bad_sender = build_session_control(
+        &claimant,
+        SessionPerformative::Intent,
+        &ceremony,
+        &claimant_id,
+        body,
+        CausedBy::Single(root.clone()),
+    )
+    .expect("bad sender");
+    assert_eq!(
+        monitor
+            .admit(SessionPerformative::Intent, &bad_sender, body)
+            .expect("sender role verdict")
             .verdict(),
         ProtocolVerdict::Violation
     );

@@ -59,6 +59,7 @@ pub fn component_status(name: &str) -> ComponentStatus {
         "limiter-observability" => ComponentStatus::Implemented,
         "cpace-core" => ComponentStatus::Implemented,
         "secure-channel" => ComponentStatus::Implemented,
+        "cbcl-protocol" => ComponentStatus::Implemented,
         _ => ComponentStatus::NotImplemented,
     }
 }
