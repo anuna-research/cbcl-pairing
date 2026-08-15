@@ -6,6 +6,8 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod wire;
+
 /// Exact normative role-free bootstrap dialect source.
 pub const BOOTSTRAP_DIALECT_SOURCE: &str =
     include_str!("../dialects/blind-pairing-bootstrap-v1.cbcl");

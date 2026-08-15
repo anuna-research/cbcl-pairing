@@ -18,7 +18,13 @@ relay = ["std"]
 [dependencies]
 cbcl-core = { git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
 cbcl-parser = { git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
+cbor2 = "1.1"
+cddl-cat = { version = "0.7", default-features = false, features = ["ciborium"] }
+ciborium = "0.2"
+serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
+static-regular-grammar = "2.0"
+url = "2.5"
 
 [dev-dependencies]
 hex = "0.4"
@@ -27,4 +33,3 @@ hex = "0.4"
 name = "cbcl-pairing-relay"
 path = "src/bin/cbcl-pairing-relay.rs"
 required-features = ["relay"]
-
