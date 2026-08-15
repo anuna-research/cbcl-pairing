@@ -8,8 +8,9 @@ cryptographic endpoint.
 
 The implementation is experimental. Its conformance implementation is
 authorised, but production use and production invitation allocation are not.
-The human cryptography, adversarial, and independent-endpoint review gates are
-still open.
+The human cryptography, fresh-context adversarial, and named integration/profile
+review gates are still open. The local cross-language endpoint vector gate has
+passed.
 
 ## User experience
 
