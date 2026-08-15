@@ -63,6 +63,7 @@ pub fn component_status(name: &str) -> ComponentStatus {
         "secure-channel" => ComponentStatus::Implemented,
         "cbcl-protocol" => ComponentStatus::Implemented,
         "endpoint-reducer" => ComponentStatus::Implemented,
+        "application-profiles" => ComponentStatus::Implemented,
         _ => ComponentStatus::NotImplemented,
     }
 }

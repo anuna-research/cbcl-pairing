@@ -1,21 +1,31 @@
 //! Endpoint-local application profile contracts.
 //!
-//! Profiles recognise application claims and payloads after the shared pairing
-//! core has established the channel. They are never consulted by the relay.
+//! Profiles recognise invitation carriage, claims, displayed intent, payload
+//! binding, and grant-verifier inputs. They are injected into an endpoint and
+//! are never registered with or consulted by the relay.
 
-use crate::wire::{ApplicationPayload, Locator, PairingIntent};
-use std::fmt;
+use crate::wire::{ApplicationPayload, Invitation, Locator, PairingIntent};
+use ciborium::Value;
+use sha2::{Digest, Sha256};
+use std::{fmt, io::Cursor};
+use url::Url;
 
 /// Agent pairing application identifier.
 pub const AGENT_APPLICATION: &str = "anuna.io/agent/v1";
+/// Exact agent intent action.
+pub const AGENT_ACTION: &str = "pair-agent";
 /// Agent pairing grant payload identifier.
 pub const AGENT_PAYLOAD: &str = "anuna.io/agent-grant/v1";
 /// Credential transfer application identifier.
 pub const CREDENTIAL_APPLICATION: &str = "anuna.io/credential/v1";
+/// Exact credential intent action.
+pub const CREDENTIAL_ACTION: &str = "transfer-credential";
 /// Account credential payload identifier.
 pub const CREDENTIAL_PAYLOAD: &str = "anuna.io/account-credential/v1";
 /// Conformance-only synthetic application identifier.
 pub const SYNTHETIC_APPLICATION: &str = "example.test/synthetic/v1";
+/// Exact synthetic intent action.
+pub const SYNTHETIC_ACTION: &str = "exercise-profile";
 /// Conformance-only synthetic grant payload identifier.
 pub const SYNTHETIC_PAYLOAD: &str = "example.test/synthetic-grant/v1";
 
@@ -101,8 +111,9 @@ pub struct ProfileIntent {
 }
 
 impl ProfileIntent {
-    /// Construct a recognised intent from display fields and canonical binding
-    /// material. The material itself is not retained.
+    /// Construct a recognised intent from display fields and a digest over the
+    /// profile's canonical binding material. The plaintext material is not
+    /// retained by the shared endpoint.
     #[must_use]
     pub fn new(display: DisplayIntent, binding: [u8; 32]) -> Self {
         Self {
@@ -115,6 +126,24 @@ impl ProfileIntent {
     #[must_use]
     pub fn into_parts(self) -> (DisplayIntent, ProfileBinding) {
         (self.display, self.binding)
+    }
+}
+
+/// Fully recognised payload input passed to an application grant verifier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecognisedPayload {
+    application: String,
+    payload_type: String,
+    body: Vec<u8>,
+}
+
+impl RecognisedPayload {
+    fn grant(self) -> AuthorisedGrant {
+        AuthorisedGrant {
+            application: self.application,
+            payload_type: self.payload_type,
+            body: self.body,
+        }
     }
 }
 
@@ -132,8 +161,8 @@ pub struct AuthorisedGrant {
 /// Closed profile failure classification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProfileError {
-    /// Temporary behavioural Red Gate sentinel.
-    NotImplemented,
+    /// Invitation application, carrier, or secret encoding is invalid.
+    InvalidInvitation,
     /// Invitation and profile application identifiers differ.
     WrongApplication,
     /// The action is not defined by the selected profile.
@@ -156,41 +185,239 @@ impl fmt::Display for ProfileError {
 
 impl std::error::Error for ProfileError {}
 
+/// Application-owned verifier for an already recognised and intent-bound
+/// payload. Agent and credential consumers inject their authoritative verifier
+/// rather than teaching the shared pairing crate application grant semantics.
+pub trait GrantVerifier: fmt::Debug + Send {
+    /// Accept or deny one exact recognised verifier input.
+    fn verify(&mut self, payload: &RecognisedPayload) -> Result<(), ProfileError>;
+}
+
 /// Endpoint-local application contract used by the shared reducer.
 pub trait ApplicationProfile: fmt::Debug + Send {
     /// Describe carrier, approval, payload, and verifier semantics.
     fn descriptor(&self) -> &ProfileDescriptor;
 
+    /// Fully recognise the profile-owned invitation carrier contract.
+    fn recognise_invitation(&self, invitation: &Invitation) -> Result<(), ProfileError>;
+
     /// Fully recognise an intent before any display or approval affordance.
     fn recognise_intent(&self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError>;
 
-    /// Recognise and authorize an approval-gated payload.
-    fn authorize_payload(
-        &mut self,
+    /// Recognise a payload and its binding without invoking the grant verifier.
+    fn recognise_payload(
+        &self,
         binding: &ProfileBinding,
         payload: &ApplicationPayload,
+    ) -> Result<RecognisedPayload, ProfileError>;
+
+    /// Invoke the authoritative verifier for one already pairing-gated payload.
+    fn authorize_payload(
+        &mut self,
+        payload: RecognisedPayload,
     ) -> Result<AuthorisedGrant, ProfileError>;
 }
 
-/// Built-in agent pairing profile.
+/// Fields split across the two agent intent claim bodies.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentIntentClaims {
+    /// Pairing channel presented to the approving person.
+    pub channel: String,
+    /// Principal claimed by the invitation holder.
+    pub claimed_principal: String,
+    /// Agent handle claimed by the invitation holder.
+    pub agent_handle: String,
+    /// Requested application grant.
+    pub requested_grant: String,
+}
+
+impl AgentIntentClaims {
+    /// Encode the allocator and claimant claim bodies as deterministic CBOR.
+    pub fn encode(&self) -> Result<(Vec<u8>, Vec<u8>), ProfileError> {
+        validate_agent_claims(self)?;
+        Ok((
+            encode_map(vec![
+                ("principal", Value::Text(self.claimed_principal.clone())),
+                ("agent-handle", Value::Text(self.agent_handle.clone())),
+                ("requested-grant", Value::Text(self.requested_grant.clone())),
+            ])?,
+            encode_map(vec![("channel", Value::Text(self.channel.clone()))])?,
+        ))
+    }
+}
+
+/// Fully typed agent grant body.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentGrant {
+    /// Principal bound to the approved intent.
+    pub claimed_principal: String,
+    /// Agent handle bound to the approved intent.
+    pub agent_handle: String,
+    /// Requested grant bound to the approved intent.
+    pub requested_grant: String,
+    /// Opaque SPEC-061 grant bytes.
+    pub grant: Vec<u8>,
+}
+
+impl AgentGrant {
+    /// Encode the grant body as deterministic CBOR.
+    pub fn encode(&self) -> Result<Vec<u8>, ProfileError> {
+        validate_agent_texts(
+            &self.claimed_principal,
+            &self.agent_handle,
+            &self.requested_grant,
+        )?;
+        bounded_bytes(&self.grant, 1, 63_000).map_err(|_| ProfileError::InvalidPayload)?;
+        encode_map(vec![
+            ("principal", Value::Text(self.claimed_principal.clone())),
+            ("agent-handle", Value::Text(self.agent_handle.clone())),
+            ("requested-grant", Value::Text(self.requested_grant.clone())),
+            ("grant", Value::Bytes(self.grant.clone())),
+        ])
+        .map_err(|_| ProfileError::InvalidPayload)
+    }
+}
+
+/// Fields split across the two credential intent claim bodies.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CredentialIntentClaims {
+    /// Canonical application identifier receiving the credential.
+    pub application_id: String,
+    /// Canonical HTTPS origin receiving the credential.
+    pub origin: String,
+    /// Requested account scope.
+    pub scope: String,
+    /// Recipient claimed by the invitation holder.
+    pub recipient: String,
+}
+
+impl CredentialIntentClaims {
+    /// Encode the allocator and claimant claim bodies as deterministic CBOR.
+    pub fn encode(&self) -> Result<(Vec<u8>, Vec<u8>), ProfileError> {
+        validate_credential_claims(self)?;
+        Ok((
+            encode_map(vec![
+                ("application-id", Value::Text(self.application_id.clone())),
+                ("origin", Value::Text(self.origin.clone())),
+                ("scope", Value::Text(self.scope.clone())),
+            ])?,
+            encode_map(vec![("recipient", Value::Text(self.recipient.clone()))])?,
+        ))
+    }
+}
+
+/// Fully typed account credential payload body.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CredentialGrant {
+    /// Application identifier bound to the approved intent.
+    pub application_id: String,
+    /// HTTPS origin bound to the approved intent.
+    pub origin: String,
+    /// Scope bound to the approved intent.
+    pub scope: String,
+    /// Recipient bound to the approved intent.
+    pub recipient: String,
+    /// Opaque SPEC-004/PROTO-004 credential bytes.
+    pub credential: Vec<u8>,
+}
+
+impl CredentialGrant {
+    /// Encode the credential body as deterministic CBOR.
+    pub fn encode(&self) -> Result<Vec<u8>, ProfileError> {
+        validate_credential_claims(&CredentialIntentClaims {
+            application_id: self.application_id.clone(),
+            origin: self.origin.clone(),
+            scope: self.scope.clone(),
+            recipient: self.recipient.clone(),
+        })?;
+        bounded_bytes(&self.credential, 1, 62_000).map_err(|_| ProfileError::InvalidPayload)?;
+        encode_map(vec![
+            ("application-id", Value::Text(self.application_id.clone())),
+            ("origin", Value::Text(self.origin.clone())),
+            ("scope", Value::Text(self.scope.clone())),
+            ("recipient", Value::Text(self.recipient.clone())),
+            ("credential", Value::Bytes(self.credential.clone())),
+        ])
+        .map_err(|_| ProfileError::InvalidPayload)
+    }
+}
+
+/// Fields split across the synthetic intent claim bodies.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyntheticIntentClaims {
+    /// Synthetic subject.
+    pub subject: String,
+    /// Synthetic audience.
+    pub audience: String,
+}
+
+impl SyntheticIntentClaims {
+    /// Encode the allocator and claimant claim bodies as deterministic CBOR.
+    pub fn encode(&self) -> Result<(Vec<u8>, Vec<u8>), ProfileError> {
+        validate_synthetic_claims(self)?;
+        Ok((
+            encode_map(vec![("subject", Value::Text(self.subject.clone()))])?,
+            encode_map(vec![("audience", Value::Text(self.audience.clone()))])?,
+        ))
+    }
+}
+
+/// Fully typed synthetic payload body.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyntheticGrant {
+    /// Subject bound to the approved intent.
+    pub subject: String,
+    /// Audience bound to the approved intent.
+    pub audience: String,
+    /// Opaque synthetic grant bytes.
+    pub grant: Vec<u8>,
+}
+
+impl SyntheticGrant {
+    /// Encode the synthetic grant as deterministic CBOR.
+    pub fn encode(&self) -> Result<Vec<u8>, ProfileError> {
+        validate_synthetic_claims(&SyntheticIntentClaims {
+            subject: self.subject.clone(),
+            audience: self.audience.clone(),
+        })?;
+        bounded_bytes(&self.grant, 1, 63_000).map_err(|_| ProfileError::InvalidPayload)?;
+        encode_map(vec![
+            ("subject", Value::Text(self.subject.clone())),
+            ("audience", Value::Text(self.audience.clone())),
+            ("grant", Value::Bytes(self.grant.clone())),
+        ])
+        .map_err(|_| ProfileError::InvalidPayload)
+    }
+}
+
+/// Encode two independently generated BIP-39 indices as four canonical
+/// big-endian octets. Each index contributes 11 bits, for 22 total bits.
+pub fn encode_agent_word_indices(first: u16, second: u16) -> Result<[u8; 4], ProfileError> {
+    if first > 2047 || second > 2047 {
+        return Err(ProfileError::InvalidInvitation);
+    }
+    let mut result = [0_u8; 4];
+    result[..2].copy_from_slice(&first.to_be_bytes());
+    result[2..].copy_from_slice(&second.to_be_bytes());
+    Ok(result)
+}
+
+/// Built-in agent pairing profile with an application-supplied SPEC-061
+/// verifier.
 #[derive(Debug)]
 pub struct AgentProfile {
     descriptor: ProfileDescriptor,
+    verifier: Box<dyn GrantVerifier>,
 }
 
 impl AgentProfile {
     /// Construct the fixed version-1 agent profile.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(verifier: Box<dyn GrantVerifier>) -> Self {
         Self {
             descriptor: agent_descriptor(),
+            verifier,
         }
-    }
-}
-
-impl Default for AgentProfile {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -199,38 +426,79 @@ impl ApplicationProfile for AgentProfile {
         &self.descriptor
     }
 
-    fn recognise_intent(&self, _intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
-        Err(ProfileError::NotImplemented)
+    fn recognise_invitation(&self, invitation: &Invitation) -> Result<(), ProfileError> {
+        common_invitation(&self.descriptor, invitation)?;
+        if invitation.secret.len() != 4 {
+            return Err(ProfileError::InvalidInvitation);
+        }
+        let first = u16::from_be_bytes([invitation.secret[0], invitation.secret[1]]);
+        let second = u16::from_be_bytes([invitation.secret[2], invitation.secret[3]]);
+        encode_agent_word_indices(first, second)?;
+        Ok(())
+    }
+
+    fn recognise_intent(&self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
+        common_intent(&self.descriptor, AGENT_ACTION, intent)?;
+        let claims = decode_agent_claims(&intent.allocator_claim, &intent.claimant_claim)?;
+        let binding = agent_binding(&claims)?;
+        Ok(ProfileIntent::new(
+            display_intent(
+                intent,
+                vec![
+                    display("channel", claims.channel),
+                    display("claimed principal", claims.claimed_principal),
+                    display("agent handle", claims.agent_handle),
+                    display("requested grant", claims.requested_grant),
+                ],
+            ),
+            binding,
+        ))
+    }
+
+    fn recognise_payload(
+        &self,
+        binding: &ProfileBinding,
+        payload: &ApplicationPayload,
+    ) -> Result<RecognisedPayload, ProfileError> {
+        payload_type(&self.descriptor, payload)?;
+        let grant = decode_agent_grant(&payload.body)?;
+        let claims = AgentIntentClaims {
+            channel: String::new(),
+            claimed_principal: grant.claimed_principal,
+            agent_handle: grant.agent_handle,
+            requested_grant: grant.requested_grant,
+        };
+        if agent_payload_binding(&claims)? != binding.0 {
+            return Err(ProfileError::InvalidPayload);
+        }
+        Ok(recognised(&self.descriptor, payload))
     }
 
     fn authorize_payload(
         &mut self,
-        _binding: &ProfileBinding,
-        _payload: &ApplicationPayload,
+        payload: RecognisedPayload,
     ) -> Result<AuthorisedGrant, ProfileError> {
-        Err(ProfileError::NotImplemented)
+        self.verifier.verify(&payload)?;
+        Ok(payload.grant())
     }
 }
 
-/// Built-in account credential transfer profile.
+/// Built-in account credential transfer profile with an application-supplied
+/// SPEC-004/PROTO-004 verifier.
 #[derive(Debug)]
 pub struct CredentialProfile {
     descriptor: ProfileDescriptor,
+    verifier: Box<dyn GrantVerifier>,
 }
 
 impl CredentialProfile {
     /// Construct the fixed version-1 credential profile.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(verifier: Box<dyn GrantVerifier>) -> Self {
         Self {
             descriptor: credential_descriptor(),
+            verifier,
         }
-    }
-}
-
-impl Default for CredentialProfile {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -239,16 +507,57 @@ impl ApplicationProfile for CredentialProfile {
         &self.descriptor
     }
 
-    fn recognise_intent(&self, _intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
-        Err(ProfileError::NotImplemented)
+    fn recognise_invitation(&self, invitation: &Invitation) -> Result<(), ProfileError> {
+        common_invitation(&self.descriptor, invitation)?;
+        if invitation.secret.len() != 16 {
+            return Err(ProfileError::InvalidInvitation);
+        }
+        Ok(())
+    }
+
+    fn recognise_intent(&self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
+        common_intent(&self.descriptor, CREDENTIAL_ACTION, intent)?;
+        let claims = decode_credential_claims(&intent.allocator_claim, &intent.claimant_claim)?;
+        let binding = credential_binding(&claims)?;
+        Ok(ProfileIntent::new(
+            display_intent(
+                intent,
+                vec![
+                    display("applicationId", claims.application_id),
+                    display("HTTPS origin", claims.origin),
+                    display("requested scope", claims.scope),
+                    display("recipient", claims.recipient),
+                ],
+            ),
+            binding,
+        ))
+    }
+
+    fn recognise_payload(
+        &self,
+        binding: &ProfileBinding,
+        payload: &ApplicationPayload,
+    ) -> Result<RecognisedPayload, ProfileError> {
+        payload_type(&self.descriptor, payload)?;
+        let grant = decode_credential_grant(&payload.body)?;
+        let claims = CredentialIntentClaims {
+            application_id: grant.application_id,
+            origin: grant.origin,
+            scope: grant.scope,
+            recipient: grant.recipient,
+        };
+        if credential_binding(&claims)? != binding.0 {
+            return Err(ProfileError::InvalidPayload);
+        }
+        Ok(recognised(&self.descriptor, payload))
     }
 
     fn authorize_payload(
         &mut self,
-        _binding: &ProfileBinding,
-        _payload: &ApplicationPayload,
+        payload: RecognisedPayload,
     ) -> Result<AuthorisedGrant, ProfileError> {
-        Err(ProfileError::NotImplemented)
+        self.verifier.verify(&payload)?;
+        Ok(payload.grant())
     }
 }
 
@@ -275,17 +584,55 @@ impl ApplicationProfile for SyntheticProfile {
         &self.descriptor
     }
 
-    fn recognise_intent(&self, _intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
-        Err(ProfileError::NotImplemented)
+    fn recognise_invitation(&self, invitation: &Invitation) -> Result<(), ProfileError> {
+        common_invitation(&self.descriptor, invitation)?;
+        if invitation.secret.len() != 16 {
+            return Err(ProfileError::InvalidInvitation);
+        }
+        Ok(())
+    }
+
+    fn recognise_intent(&self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
+        common_intent(&self.descriptor, SYNTHETIC_ACTION, intent)?;
+        let claims = decode_synthetic_claims(&intent.allocator_claim, &intent.claimant_claim)?;
+        let binding = synthetic_binding(&claims)?;
+        Ok(ProfileIntent::new(
+            display_intent(
+                intent,
+                vec![
+                    display("synthetic subject", claims.subject),
+                    display("synthetic audience", claims.audience),
+                ],
+            ),
+            binding,
+        ))
+    }
+
+    fn recognise_payload(
+        &self,
+        binding: &ProfileBinding,
+        payload: &ApplicationPayload,
+    ) -> Result<RecognisedPayload, ProfileError> {
+        payload_type(&self.descriptor, payload)?;
+        let grant = decode_synthetic_grant(&payload.body)?;
+        let claims = SyntheticIntentClaims {
+            subject: grant.subject,
+            audience: grant.audience,
+        };
+        if synthetic_binding(&claims)? != binding.0 {
+            return Err(ProfileError::InvalidPayload);
+        }
+        Ok(recognised(&self.descriptor, payload))
     }
 
     fn authorize_payload(
         &mut self,
-        _binding: &ProfileBinding,
-        _payload: &ApplicationPayload,
+        payload: RecognisedPayload,
     ) -> Result<AuthorisedGrant, ProfileError> {
-        let _ = self.authorize;
-        Err(ProfileError::NotImplemented)
+        if !self.authorize {
+            return Err(ProfileError::Unauthorized);
+        }
+        Ok(payload.grant())
     }
 }
 
@@ -329,4 +676,367 @@ fn synthetic_descriptor() -> ProfileDescriptor {
         approval_authority: "explicit conformance decision",
         grant_verifier: "synthetic fixed-decision verifier",
     }
+}
+
+fn common_invitation(
+    descriptor: &ProfileDescriptor,
+    invitation: &Invitation,
+) -> Result<(), ProfileError> {
+    if invitation.application != descriptor.application {
+        return Err(ProfileError::WrongApplication);
+    }
+    if !descriptor.carrier.locator.matches(&invitation.locator) {
+        return Err(ProfileError::InvalidInvitation);
+    }
+    Ok(())
+}
+
+fn common_intent(
+    descriptor: &ProfileDescriptor,
+    action: &str,
+    intent: &PairingIntent,
+) -> Result<(), ProfileError> {
+    if intent.application != descriptor.application {
+        return Err(ProfileError::WrongApplication);
+    }
+    if intent.action != action {
+        return Err(ProfileError::InvalidAction);
+    }
+    Ok(())
+}
+
+fn payload_type(
+    descriptor: &ProfileDescriptor,
+    payload: &ApplicationPayload,
+) -> Result<(), ProfileError> {
+    if payload.payload_type != descriptor.payload_type {
+        return Err(ProfileError::InvalidPayloadType);
+    }
+    Ok(())
+}
+
+fn display_intent(intent: &PairingIntent, fields: Vec<DisplayField>) -> DisplayIntent {
+    DisplayIntent {
+        application: intent.application.clone(),
+        action: intent.action.clone(),
+        authority_summary: intent.authority_summary.clone(),
+        fields,
+    }
+}
+
+fn display(label: &'static str, value: String) -> DisplayField {
+    DisplayField {
+        label,
+        value,
+        claimed_by_secret_holder: true,
+    }
+}
+
+fn recognised(descriptor: &ProfileDescriptor, payload: &ApplicationPayload) -> RecognisedPayload {
+    RecognisedPayload {
+        application: descriptor.application.into(),
+        payload_type: payload.payload_type.clone(),
+        body: payload.body.clone(),
+    }
+}
+
+fn decode_agent_claims(
+    allocator: &[u8],
+    claimant: &[u8],
+) -> Result<AgentIntentClaims, ProfileError> {
+    let allocator = canonical_map(allocator, 3, ProfileError::InvalidClaim)?;
+    let claimant = canonical_map(claimant, 1, ProfileError::InvalidClaim)?;
+    let result = AgentIntentClaims {
+        channel: text_field(&claimant, "channel", 64, ProfileError::InvalidClaim)?,
+        claimed_principal: text_field(&allocator, "principal", 255, ProfileError::InvalidClaim)?,
+        agent_handle: text_field(&allocator, "agent-handle", 128, ProfileError::InvalidClaim)?,
+        requested_grant: text_field(
+            &allocator,
+            "requested-grant",
+            128,
+            ProfileError::InvalidClaim,
+        )?,
+    };
+    validate_agent_claims(&result)?;
+    Ok(result)
+}
+
+fn decode_agent_grant(input: &[u8]) -> Result<AgentGrant, ProfileError> {
+    let fields = canonical_map(input, 4, ProfileError::InvalidPayload)?;
+    let result = AgentGrant {
+        claimed_principal: text_field(&fields, "principal", 255, ProfileError::InvalidPayload)?,
+        agent_handle: text_field(&fields, "agent-handle", 128, ProfileError::InvalidPayload)?,
+        requested_grant: text_field(
+            &fields,
+            "requested-grant",
+            128,
+            ProfileError::InvalidPayload,
+        )?,
+        grant: bytes_field(&fields, "grant", 63_000, ProfileError::InvalidPayload)?,
+    };
+    validate_agent_texts(
+        &result.claimed_principal,
+        &result.agent_handle,
+        &result.requested_grant,
+    )?;
+    Ok(result)
+}
+
+fn validate_agent_claims(value: &AgentIntentClaims) -> Result<(), ProfileError> {
+    bounded_text(&value.channel, 64).map_err(|_| ProfileError::InvalidClaim)?;
+    validate_agent_texts(
+        &value.claimed_principal,
+        &value.agent_handle,
+        &value.requested_grant,
+    )
+}
+
+fn validate_agent_texts(
+    principal: &str,
+    handle: &str,
+    requested_grant: &str,
+) -> Result<(), ProfileError> {
+    bounded_text(principal, 255).map_err(|_| ProfileError::InvalidClaim)?;
+    bounded_text(handle, 128).map_err(|_| ProfileError::InvalidClaim)?;
+    bounded_text(requested_grant, 128).map_err(|_| ProfileError::InvalidClaim)
+}
+
+fn agent_binding(value: &AgentIntentClaims) -> Result<[u8; 32], ProfileError> {
+    binding(&[
+        AGENT_APPLICATION,
+        AGENT_ACTION,
+        &value.claimed_principal,
+        &value.agent_handle,
+        &value.requested_grant,
+    ])
+}
+
+fn agent_payload_binding(value: &AgentIntentClaims) -> Result<[u8; 32], ProfileError> {
+    // Channel is deliberately display-only; the grant is bound to the three
+    // identity/authority fields that it repeats.
+    binding(&[
+        AGENT_APPLICATION,
+        AGENT_ACTION,
+        &value.claimed_principal,
+        &value.agent_handle,
+        &value.requested_grant,
+    ])
+}
+
+fn decode_credential_claims(
+    allocator: &[u8],
+    claimant: &[u8],
+) -> Result<CredentialIntentClaims, ProfileError> {
+    let allocator = canonical_map(allocator, 3, ProfileError::InvalidClaim)?;
+    let claimant = canonical_map(claimant, 1, ProfileError::InvalidClaim)?;
+    let result = CredentialIntentClaims {
+        application_id: text_field(
+            &allocator,
+            "application-id",
+            255,
+            ProfileError::InvalidClaim,
+        )?,
+        origin: text_field(&allocator, "origin", 255, ProfileError::InvalidClaim)?,
+        scope: text_field(&allocator, "scope", 255, ProfileError::InvalidClaim)?,
+        recipient: text_field(&claimant, "recipient", 255, ProfileError::InvalidClaim)?,
+    };
+    validate_credential_claims(&result)?;
+    Ok(result)
+}
+
+fn decode_credential_grant(input: &[u8]) -> Result<CredentialGrant, ProfileError> {
+    let fields = canonical_map(input, 5, ProfileError::InvalidPayload)?;
+    let result = CredentialGrant {
+        application_id: text_field(&fields, "application-id", 255, ProfileError::InvalidPayload)?,
+        origin: text_field(&fields, "origin", 255, ProfileError::InvalidPayload)?,
+        scope: text_field(&fields, "scope", 255, ProfileError::InvalidPayload)?,
+        recipient: text_field(&fields, "recipient", 255, ProfileError::InvalidPayload)?,
+        credential: bytes_field(&fields, "credential", 62_000, ProfileError::InvalidPayload)?,
+    };
+    validate_credential_claims(&CredentialIntentClaims {
+        application_id: result.application_id.clone(),
+        origin: result.origin.clone(),
+        scope: result.scope.clone(),
+        recipient: result.recipient.clone(),
+    })
+    .map_err(|_| ProfileError::InvalidPayload)?;
+    Ok(result)
+}
+
+fn validate_credential_claims(value: &CredentialIntentClaims) -> Result<(), ProfileError> {
+    bounded_text(&value.application_id, 255).map_err(|_| ProfileError::InvalidClaim)?;
+    canonical_https_origin(&value.origin).map_err(|_| ProfileError::InvalidClaim)?;
+    bounded_text(&value.scope, 255).map_err(|_| ProfileError::InvalidClaim)?;
+    bounded_text(&value.recipient, 255).map_err(|_| ProfileError::InvalidClaim)
+}
+
+fn credential_binding(value: &CredentialIntentClaims) -> Result<[u8; 32], ProfileError> {
+    binding(&[
+        CREDENTIAL_APPLICATION,
+        CREDENTIAL_ACTION,
+        &value.application_id,
+        &value.origin,
+        &value.scope,
+        &value.recipient,
+    ])
+}
+
+fn decode_synthetic_claims(
+    allocator: &[u8],
+    claimant: &[u8],
+) -> Result<SyntheticIntentClaims, ProfileError> {
+    let allocator = canonical_map(allocator, 1, ProfileError::InvalidClaim)?;
+    let claimant = canonical_map(claimant, 1, ProfileError::InvalidClaim)?;
+    let result = SyntheticIntentClaims {
+        subject: text_field(&allocator, "subject", 128, ProfileError::InvalidClaim)?,
+        audience: text_field(&claimant, "audience", 128, ProfileError::InvalidClaim)?,
+    };
+    validate_synthetic_claims(&result)?;
+    Ok(result)
+}
+
+fn decode_synthetic_grant(input: &[u8]) -> Result<SyntheticGrant, ProfileError> {
+    let fields = canonical_map(input, 3, ProfileError::InvalidPayload)?;
+    let result = SyntheticGrant {
+        subject: text_field(&fields, "subject", 128, ProfileError::InvalidPayload)?,
+        audience: text_field(&fields, "audience", 128, ProfileError::InvalidPayload)?,
+        grant: bytes_field(&fields, "grant", 63_000, ProfileError::InvalidPayload)?,
+    };
+    validate_synthetic_claims(&SyntheticIntentClaims {
+        subject: result.subject.clone(),
+        audience: result.audience.clone(),
+    })
+    .map_err(|_| ProfileError::InvalidPayload)?;
+    Ok(result)
+}
+
+fn validate_synthetic_claims(value: &SyntheticIntentClaims) -> Result<(), ProfileError> {
+    bounded_text(&value.subject, 128).map_err(|_| ProfileError::InvalidClaim)?;
+    bounded_text(&value.audience, 128).map_err(|_| ProfileError::InvalidClaim)
+}
+
+fn synthetic_binding(value: &SyntheticIntentClaims) -> Result<[u8; 32], ProfileError> {
+    binding(&[
+        SYNTHETIC_APPLICATION,
+        SYNTHETIC_ACTION,
+        &value.subject,
+        &value.audience,
+    ])
+}
+
+fn binding(fields: &[&str]) -> Result<[u8; 32], ProfileError> {
+    let value = Value::Array(
+        fields
+            .iter()
+            .map(|field| Value::Text((*field).into()))
+            .collect(),
+    );
+    let encoded = cbor2::to_canonical_vec(&value).map_err(|_| ProfileError::InvalidClaim)?;
+    Ok(Sha256::digest(encoded).into())
+}
+
+fn encode_map(fields: Vec<(&str, Value)>) -> Result<Vec<u8>, ProfileError> {
+    let value = Value::Map(
+        fields
+            .into_iter()
+            .map(|(key, value)| (Value::Text(key.into()), value))
+            .collect(),
+    );
+    cbor2::to_canonical_vec(&value).map_err(|_| ProfileError::InvalidClaim)
+}
+
+fn canonical_map(
+    input: &[u8],
+    expected_fields: usize,
+    error: ProfileError,
+) -> Result<Vec<(Value, Value)>, ProfileError> {
+    let mut cursor = Cursor::new(input);
+    let value: Value = ciborium::from_reader(&mut cursor).map_err(|_| error)?;
+    if cursor.position() != input.len() as u64 {
+        return Err(error);
+    }
+    let canonical = cbor2::to_canonical_vec(&value).map_err(|_| error)?;
+    if canonical != input {
+        return Err(error);
+    }
+    let Value::Map(fields) = value else {
+        return Err(error);
+    };
+    if fields.len() != expected_fields {
+        return Err(error);
+    }
+    Ok(fields)
+}
+
+fn text_field(
+    fields: &[(Value, Value)],
+    name: &str,
+    max: usize,
+    error: ProfileError,
+) -> Result<String, ProfileError> {
+    let mut matches = fields.iter().filter(|(key, _)| key.as_text() == Some(name));
+    let (_, value) = matches.next().ok_or(error)?;
+    if matches.next().is_some() {
+        return Err(error);
+    }
+    let text = value.as_text().ok_or(error)?;
+    bounded_text(text, max).map_err(|_| error)?;
+    Ok(text.into())
+}
+
+fn bytes_field(
+    fields: &[(Value, Value)],
+    name: &str,
+    max: usize,
+    error: ProfileError,
+) -> Result<Vec<u8>, ProfileError> {
+    let mut matches = fields.iter().filter(|(key, _)| key.as_text() == Some(name));
+    let (_, value) = matches.next().ok_or(error)?;
+    if matches.next().is_some() {
+        return Err(error);
+    }
+    let bytes = value.as_bytes().ok_or(error)?;
+    bounded_bytes(bytes, 1, max).map_err(|_| error)?;
+    Ok(bytes.to_vec())
+}
+
+fn bounded_text(value: &str, max: usize) -> Result<(), ()> {
+    if value.is_empty()
+        || value.len() > max
+        || value.chars().any(|character| character.is_control())
+    {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
+fn bounded_bytes(value: &[u8], min: usize, max: usize) -> Result<(), ()> {
+    if value.len() < min || value.len() > max {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
+fn canonical_https_origin(value: &str) -> Result<(), ()> {
+    let parsed = Url::parse(value).map_err(|_| ())?;
+    if parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || parsed.path() != "/"
+    {
+        return Err(());
+    }
+    let host = parsed.host_str().ok_or(())?;
+    let canonical = match parsed.port() {
+        Some(port) => format!("https://{host}:{port}"),
+        None => format!("https://{host}"),
+    };
+    if value != canonical {
+        return Err(());
+    }
+    Ok(())
 }

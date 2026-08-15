@@ -12,6 +12,7 @@ use crate::{
         ProtocolVerdict, SessionMonitor, SessionPerformative,
     },
     channel::{PendingChannel, SecureChannel},
+    profile::{ApplicationProfile, AuthorisedGrant, DisplayIntent, ProfileBinding},
     wire::{
         decode_application_payload, decode_invitation, decode_pairing_decision,
         decode_pairing_intent, decode_sealed_plaintext, encode_application_payload,
@@ -112,10 +113,10 @@ impl InvitationRecord {
 pub enum EndpointEffect {
     /// Transmit one already protected pairing-channel frame.
     SendFrame(ChannelFrame),
-    /// Display a fully recognised, channel-authenticated pairing intent.
-    DisplayIntent(PairingIntent),
-    /// Deliver one approved, digest-bound application payload to its profile.
-    DeliverPayload(ApplicationPayload),
+    /// Display a channel-authenticated and fully profile-recognised intent.
+    DisplayIntent(DisplayIntent),
+    /// Deliver one approved, digest-bound, profile-authorised grant.
+    DeliverGrant(AuthorisedGrant),
     /// Close the blind mailbox after terminal completion or failure.
     CloseMailbox,
 }
@@ -133,6 +134,8 @@ pub enum TerminalReason {
     Channel,
     /// An intent or payload digest did not match the accepted intent.
     IntentMismatch,
+    /// An application profile rejected an invitation, claim, or grant.
+    Profile,
     /// Approval and decline both appeared for one intent.
     DecisionConflict,
     /// A different attempt was presented for an already bound invitation.
@@ -158,6 +161,8 @@ pub enum ReducerError {
     Phase,
     /// A decision or payload names a different intent.
     IntentDigest,
+    /// The endpoint-local application profile rejected input.
+    Profile,
     /// Both decision siblings were observed.
     DecisionConflict,
     /// The reducer is already terminal.
@@ -176,6 +181,7 @@ impl std::error::Error for ReducerError {}
 struct IntentRecord {
     digest: [u8; 32],
     control_hash: String,
+    profile_binding: ProfileBinding,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -216,6 +222,7 @@ pub struct EndpointReducer {
     application: String,
     ceremony: String,
     expected_role_keys: [Option<[u8; 32]>; 2],
+    profile: Box<dyn ApplicationProfile>,
     record: InvitationRecord,
     ceremony_key: Option<CeremonySigningKey>,
     bootstrap: Option<BootstrapMonitor>,
@@ -232,6 +239,7 @@ pub struct EndpointReducer {
     payload_control_hash: Option<String>,
     outbound_payload_sent: bool,
     delivered_payloads: usize,
+    profile_verifications: usize,
     terminal: Option<TerminalReason>,
     local_decline_committed: bool,
     terminal_replay_frame_digest: Option<[u8; 32]>,
@@ -264,6 +272,7 @@ impl EndpointReducer {
         pending_channel: PendingChannel,
         allocator_cpace_hash: String,
         claimant_cpace_hash: String,
+        profile: Box<dyn ApplicationProfile>,
     ) -> Result<Self, ReducerError> {
         let invitation_digest: [u8; 32] = Sha256::digest(invitation).into();
         if record.status != InvitationStatus::Bound || record.invitation_digest != invitation_digest
@@ -277,12 +286,17 @@ impl EndpointReducer {
             invitation_value.expected_allocator_key,
             invitation_value.expected_claimant_key,
         ];
+        if profile.recognise_invitation(&invitation_value).is_err() {
+            invitation_value.secret.zeroize();
+            return Err(ReducerError::Profile);
+        }
         invitation_value.secret.zeroize();
         let mut endpoint = Self {
             side,
             application,
             ceremony: ceremony_id(invitation),
             expected_role_keys,
+            profile,
             record,
             ceremony_key: Some(ceremony_key),
             bootstrap: Some(bootstrap),
@@ -299,6 +313,7 @@ impl EndpointReducer {
             payload_control_hash: None,
             outbound_payload_sent: false,
             delivered_payloads: 0,
+            profile_verifications: 0,
             terminal: None,
             local_decline_committed: false,
             terminal_replay_frame_digest: None,
@@ -427,6 +442,11 @@ impl EndpointReducer {
         if intent.application != self.application {
             return self.fail(TerminalReason::IntentMismatch, ReducerError::IntentDigest);
         }
+        let (_, profile_binding) = self
+            .profile
+            .recognise_intent(intent)
+            .map_err(|_| ReducerError::Profile)?
+            .into_parts();
         let body = encode_pairing_intent(intent).map_err(|_| ReducerError::Recognition)?;
         let digest = Sha256::digest(&body).into();
         let root = self
@@ -450,6 +470,7 @@ impl EndpointReducer {
         self.intent = Some(IntentRecord {
             digest,
             control_hash: admission,
+            profile_binding,
         });
         Ok(frame)
     }
@@ -536,6 +557,9 @@ impl EndpointReducer {
         if self.outbound_payload_sent {
             return Err(ReducerError::Phase);
         }
+        self.profile
+            .recognise_payload(&intent.profile_binding, payload)
+            .map_err(|_| ReducerError::Profile)?;
         let body = encode_application_payload(payload).map_err(|_| ReducerError::Recognition)?;
         let claimant = self.role_key(PairingRole::Claimant)?;
         let control = build_session_control(
@@ -587,6 +611,12 @@ impl EndpointReducer {
     #[must_use]
     pub fn delivered_payloads(&self) -> usize {
         self.delivered_payloads
+    }
+
+    /// Number of payloads passed to the application grant verifier.
+    #[must_use]
+    pub fn profile_verifications(&self) -> usize {
+        self.profile_verifications
     }
 
     fn receive_finished(
@@ -847,6 +877,10 @@ impl EndpointReducer {
         }
         let encoded = encode_pairing_intent(&value).map_err(|_| ReducerError::Recognition)?;
         let digest = Sha256::digest(encoded).into();
+        let (display, profile_binding) = match self.profile.recognise_intent(&value) {
+            Ok(value) => value.into_parts(),
+            Err(_) => return self.fail(TerminalReason::Profile, ReducerError::Profile),
+        };
         if let Some(existing) = &self.intent {
             if existing.digest == digest && existing.control_hash == control_hash {
                 return Ok(Vec::new());
@@ -856,8 +890,9 @@ impl EndpointReducer {
         self.intent = Some(IntentRecord {
             digest,
             control_hash: control_hash.into(),
+            profile_binding,
         });
-        Ok(vec![EndpointEffect::DisplayIntent(value)])
+        Ok(vec![EndpointEffect::DisplayIntent(display)])
     }
 
     fn apply_decision(
@@ -913,9 +948,21 @@ impl EndpointReducer {
             }
             return self.fail(TerminalReason::ProtocolViolation, ReducerError::Protocol);
         }
+        let recognised = match self
+            .profile
+            .recognise_payload(&intent.profile_binding, &value)
+        {
+            Ok(value) => value,
+            Err(_) => return self.fail(TerminalReason::Profile, ReducerError::Profile),
+        };
+        self.profile_verifications += 1;
+        let grant = match self.profile.authorize_payload(recognised) {
+            Ok(value) => value,
+            Err(_) => return self.fail(TerminalReason::Profile, ReducerError::Profile),
+        };
         self.payload_control_hash = Some(control_hash.into());
         self.delivered_payloads += 1;
-        Ok(vec![EndpointEffect::DeliverPayload(value)])
+        Ok(vec![EndpointEffect::DeliverGrant(grant)])
     }
 
     fn admit_local_session(

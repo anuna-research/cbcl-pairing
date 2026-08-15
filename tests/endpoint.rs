@@ -13,6 +13,10 @@ use cbcl_pairing::{
         BindOutcome, EndpointEffect, EndpointReducer, InvitationRecord, InvitationStatus,
         ReducerError, TerminalReason,
     },
+    profile::{
+        ApplicationProfile, AuthorisedGrant, SyntheticGrant, SyntheticIntentClaims,
+        SyntheticProfile, SYNTHETIC_ACTION, SYNTHETIC_APPLICATION, SYNTHETIC_PAYLOAD,
+    },
     wire::{
         decode_pairing_intent, decode_sealed_plaintext, encode_channel_frame, encode_invitation,
         encode_pairing_decision, encode_sealed_plaintext, ApplicationPayload, ChannelFrame,
@@ -206,6 +210,7 @@ fn reducer_pair() -> (EndpointReducer, EndpointReducer) {
         m.allocator_pending,
         m.allocator_hash.clone(),
         m.claimant_hash.clone(),
+        Box::new(SyntheticProfile::new(true)),
     )
     .expect("allocator reducer");
     let claimant = EndpointReducer::new(
@@ -217,6 +222,7 @@ fn reducer_pair() -> (EndpointReducer, EndpointReducer) {
         m.claimant_pending,
         m.allocator_hash,
         m.claimant_hash,
+        Box::new(SyntheticProfile::new(true)),
     )
     .expect("claimant reducer");
     (allocator, claimant)
@@ -261,13 +267,45 @@ fn confirmed_pair() -> (EndpointReducer, EndpointReducer) {
 }
 
 fn intent() -> PairingIntent {
+    let claims = SyntheticIntentClaims {
+        subject: "synthetic subject".into(),
+        audience: "synthetic audience".into(),
+    }
+    .encode()
+    .expect("synthetic claims");
     PairingIntent {
-        application: "example.test/synthetic/v1".into(),
-        action: "pair synthetic resource".into(),
-        allocator_claim: b"allocator claim".to_vec(),
-        claimant_claim: b"claimant claim".to_vec(),
+        application: SYNTHETIC_APPLICATION.into(),
+        action: SYNTHETIC_ACTION.into(),
+        allocator_claim: claims.0,
+        claimant_claim: claims.1,
         authority_summary: "test authority".into(),
         intent_nonce: [0x77; 32],
+    }
+}
+
+fn displayed_intent(intent: &PairingIntent) -> cbcl_pairing::profile::DisplayIntent {
+    SyntheticProfile::new(true)
+        .recognise_intent(intent)
+        .expect("profile intent")
+        .into_parts()
+        .0
+}
+
+fn synthetic_grant_body() -> Vec<u8> {
+    SyntheticGrant {
+        subject: "synthetic subject".into(),
+        audience: "synthetic audience".into(),
+        grant: b"opaque synthetic grant".to_vec(),
+    }
+    .encode()
+    .expect("synthetic grant")
+}
+
+fn synthetic_payload(intent_digest: [u8; 32]) -> ApplicationPayload {
+    ApplicationPayload {
+        intent_digest,
+        payload_type: SYNTHETIC_PAYLOAD.into(),
+        body: synthetic_grant_body(),
     }
 }
 
@@ -319,6 +357,7 @@ fn test_021_unknown_finished_has_no_crypto_or_role_cast_effect() {
         m.allocator_pending,
         m.allocator_hash,
         m.claimant_hash,
+        Box::new(SyntheticProfile::new(true)),
     )
     .expect("endpoint");
 
@@ -343,12 +382,13 @@ fn test_021_unknown_finished_has_no_crypto_or_role_cast_effect() {
 fn test_009_decline_erases_both_endpoints_and_releases_no_payload() {
     let (mut allocator, mut claimant) = confirmed_pair();
     let intent = intent();
+    let display = displayed_intent(&intent);
     let intent_frame = allocator.send_intent(&intent).expect("send intent");
     assert_eq!(
         claimant
             .receive_frame(&intent_frame)
             .expect("receive intent"),
-        vec![EndpointEffect::DisplayIntent(intent)]
+        vec![EndpointEffect::DisplayIntent(display)]
     );
     let decline_effects = claimant.decide(Decision::Decline).expect("decline");
     let decline_frame = extract_frame(&decline_effects);
@@ -399,7 +439,7 @@ fn test_022_decision_is_atomic_replay_idempotent_and_conflict_terminal() {
 }
 
 #[test]
-fn approved_payload_is_released_once_and_only_for_the_intent_digest() {
+fn test_012_approved_payload_is_released_once_and_only_for_the_intent_digest() {
     let (mut allocator, mut claimant) = confirmed_pair();
     let intent_frame = allocator.send_intent(&intent()).expect("intent");
     claimant
@@ -412,25 +452,91 @@ fn approved_payload_is_released_once_and_only_for_the_intent_digest() {
     let digest = allocator.intent_digest().expect("accepted intent digest");
     let payload = ApplicationPayload {
         intent_digest: digest,
-        payload_type: "example.test/synthetic-grant/v1".into(),
-        body: b"opaque synthetic grant".to_vec(),
+        payload_type: SYNTHETIC_PAYLOAD.into(),
+        body: synthetic_grant_body(),
     };
     let frame = allocator.send_payload(&payload).expect("payload");
     assert_eq!(
         claimant.receive_frame(&frame).expect("payload receive"),
-        vec![EndpointEffect::DeliverPayload(payload)]
+        vec![EndpointEffect::DeliverGrant(AuthorisedGrant {
+            application: SYNTHETIC_APPLICATION.into(),
+            payload_type: SYNTHETIC_PAYLOAD.into(),
+            body: payload.body.clone(),
+        })]
     );
     assert_eq!(claimant.delivered_payloads(), 1);
+    assert_eq!(claimant.profile_verifications(), 1);
 
     let wrong = ApplicationPayload {
         intent_digest: [0x99; 32],
-        payload_type: "example.test/synthetic-grant/v1".into(),
-        body: b"wrong intent".to_vec(),
+        payload_type: SYNTHETIC_PAYLOAD.into(),
+        body: synthetic_grant_body(),
     };
     assert_eq!(
         allocator.send_payload(&wrong),
         Err(ReducerError::IntentDigest)
     );
+}
+
+#[test]
+fn test_019_authorization_cannot_bypass_pairing_gates() {
+    let (allocator, mut claimant) = reducer_pair();
+    let premature = ChannelFrame::Sealed {
+        direction: cbcl_pairing::wire::Direction::AllocatorToClaimant,
+        counter: 0,
+        ciphertext: vec![0; 17],
+    };
+    assert_eq!(claimant.receive_frame(&premature), Err(ReducerError::Phase));
+    assert_eq!(claimant.invitation_status(), InvitationStatus::Bound);
+    assert_eq!(claimant.profile_verifications(), 0);
+    assert!(!claimant.session_ready());
+    drop(allocator);
+
+    let (mut allocator, mut claimant) = confirmed_pair();
+    let intent_frame = allocator.send_intent(&intent()).expect("intent");
+    claimant
+        .receive_frame(&intent_frame)
+        .expect("recognised display");
+    let digest = allocator.intent_digest().expect("intent digest");
+    assert_eq!(
+        allocator.send_payload(&synthetic_payload(digest)),
+        Err(ReducerError::Phase)
+    );
+    assert_eq!(allocator.profile_verifications(), 0);
+    assert_eq!(claimant.profile_verifications(), 0);
+
+    let decline = claimant.decide(Decision::Decline).expect("decline");
+    allocator
+        .receive_frame(&extract_frame(&decline))
+        .expect("decline received");
+    assert_eq!(
+        allocator.send_payload(&synthetic_payload(digest)),
+        Err(ReducerError::Terminal)
+    );
+    assert_eq!(allocator.profile_verifications(), 0);
+    assert_eq!(claimant.profile_verifications(), 0);
+    assert_eq!(allocator.delivered_payloads(), 0);
+    assert_eq!(claimant.delivered_payloads(), 0);
+
+    let (mut allocator, mut claimant) = confirmed_pair();
+    let intent_frame = allocator.send_intent(&intent()).expect("intent");
+    claimant.receive_frame(&intent_frame).expect("intent");
+    let approval = claimant.decide(Decision::Approve).expect("approval");
+    allocator
+        .receive_frame(&extract_frame(&approval))
+        .expect("approved");
+    let digest = allocator.intent_digest().expect("intent digest");
+    let frame = allocator
+        .send_payload(&synthetic_payload(digest))
+        .expect("profile-valid payload");
+    let invitation_before = claimant.invitation_status();
+    assert_eq!(claimant.terminal_reason(), None);
+    assert_eq!(claimant.receive_frame(&frame).expect("authorized").len(), 1);
+    assert_eq!(claimant.profile_verifications(), 1);
+    assert_eq!(claimant.delivered_payloads(), 1);
+    assert_eq!(claimant.terminal_reason(), None);
+    assert_eq!(claimant.invitation_status(), invitation_before);
+    assert!(claimant.session_ready());
 }
 
 #[test]
@@ -446,6 +552,7 @@ fn peer_signed_but_wrong_finished_is_terminal_and_erases_keys() {
         m.allocator_pending,
         m.allocator_hash.clone(),
         m.claimant_hash.clone(),
+        Box::new(SyntheticProfile::new(true)),
     )
     .expect("allocator");
     allocator
@@ -494,6 +601,7 @@ fn test_022_two_valid_decision_siblings_received_in_sequence_are_terminal() {
         m.allocator_pending,
         m.allocator_hash.clone(),
         m.claimant_hash.clone(),
+        Box::new(SyntheticProfile::new(true)),
     )
     .expect("allocator");
     let allocator_finished = allocator
