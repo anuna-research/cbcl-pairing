@@ -55,6 +55,7 @@ pub fn component_status(name: &str) -> ComponentStatus {
         "canonical-recognisers" => ComponentStatus::Implemented,
         "mailbox-core" => ComponentStatus::Implemented,
         "limiter-observability" => ComponentStatus::Implemented,
+        "cpace-core" => ComponentStatus::Implemented,
         _ => ComponentStatus::NotImplemented,
     }
 }

@@ -21,9 +21,13 @@ cbcl-parser = { git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2
 cbor2 = "1.1"
 cddl-cat = { version = "0.7", default-features = false, features = ["ciborium"] }
 ciborium = "0.2"
+fiat-crypto = { version = "=0.3.0", default-features = false }
 hmac = "0.12"
 sha2 = "0.10"
+subtle = "2.6"
 url = "2.5"
+x25519-dalek = { version = "=2.0.1", default-features = false, features = ["zeroize"] }
+zeroize = "1.8"
 
 [dev-dependencies]
 hex = "0.4"

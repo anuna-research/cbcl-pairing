@@ -60,7 +60,8 @@ fn official_cpace255_generator_and_exchange_vector() {
          aa82c300bea7b65d2b671da71922ddf6472301b79bc270adfa8bf413285f2263",
     );
     assert_eq!(a_key.as_bytes().as_slice(), expected);
-    assert_eq!(a_key, b_key);
+    assert_eq!(a_key.as_bytes(), b_key.as_bytes());
+    assert_eq!(format!("{a_key:?}"), "IntermediateSessionKey([REDACTED])");
 }
 
 #[test]
@@ -77,9 +78,14 @@ fn generator_string_has_the_pinned_hash_input_layout() {
         [&[24], CI, &[16], sid().as_slice()].concat()
     );
     assert_eq!(
-        &Sha512::digest(string)[..32],
+        &Sha512::digest(string.as_slice())[..32],
         bytes("03998087bdb1a2617bbe25ef5a7c18cd4f84f902328701790958755ee4aed1d3")
     );
+
+    let long_prs = [0_u8; 128];
+    let long = generator_string(&long_prs, b"", b"").expect("long generator string");
+    assert_eq!(&long[..12], b"\x08CPace255\x80\x01\0");
+    assert_eq!(long[139], 0, "zero-length padding has an explicit length");
 }
 
 #[test]
@@ -156,9 +162,116 @@ fn transcript_context_is_bound_and_secret_state_is_redacted() {
     assert!(!debug.contains("dice-derived secret"));
     assert!(!debug.contains(&hex::encode(scalar)));
 
-    assert_eq!(
-        finish(state, &message),
-        Err(CpaceError::SameSide),
+    assert!(
+        matches!(finish(state, &message), Err(CpaceError::SameSide)),
         "same-side transcripts must not complete"
     );
+}
+
+#[test]
+fn both_secret_entropy_classes_use_the_same_exchange() {
+    for prs in [
+        b"two-word-dice-secret".as_slice(),
+        b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff".as_slice(),
+    ] {
+        let (allocator, claimant) = exchange(prs, prs, b"shared context", b"shared context");
+        assert_eq!(allocator, claimant);
+    }
+}
+
+#[test]
+fn wrong_secret_context_or_associated_data_cannot_agree() {
+    let (allocator, claimant) = exchange(
+        b"correct secret",
+        b"wrong secret",
+        b"shared context",
+        b"shared context",
+    );
+    assert_ne!(allocator, claimant);
+
+    let (allocator, claimant) = exchange(
+        b"correct secret",
+        b"correct secret",
+        b"allocator context",
+        b"claimant context",
+    );
+    assert_ne!(allocator, claimant);
+
+    let session_id = [9_u8; 32];
+    let (a_state, a_message) = start(
+        Side::Allocator,
+        b"secret",
+        b"context",
+        &session_id,
+        b"ADa",
+        [3; 32],
+    )
+    .expect("start A");
+    let (b_state, mut b_message) = start(
+        Side::Claimant,
+        b"secret",
+        b"context",
+        &session_id,
+        b"ADb",
+        [4; 32],
+    )
+    .expect("start B");
+    b_message.associated_data.push(0);
+    let a_key = finish(a_state, &b_message).expect("finish A");
+    let b_key = finish(b_state, &a_message).expect("finish B");
+    assert_ne!(a_key.as_bytes(), b_key.as_bytes());
+}
+
+#[test]
+fn protocol_completion_rejects_a_low_order_peer_share() {
+    use cbcl_pairing::cpace::CpaceMessage;
+
+    let (state, _) = start(
+        Side::Allocator,
+        b"secret",
+        b"context",
+        &[9; 32],
+        b"ADa",
+        [3; 32],
+    )
+    .expect("start");
+    let invalid_peer = CpaceMessage {
+        side: Side::Claimant,
+        share: [0; 32],
+        associated_data: b"ADb".to_vec(),
+    };
+    assert!(matches!(
+        finish(state, &invalid_peer),
+        Err(CpaceError::InvalidPeerPoint)
+    ));
+}
+
+fn exchange(
+    allocator_prs: &[u8],
+    claimant_prs: &[u8],
+    allocator_context: &[u8],
+    claimant_context: &[u8],
+) -> ([u8; 64], [u8; 64]) {
+    let session_id = [9_u8; 32];
+    let (a_state, a_message) = start(
+        Side::Allocator,
+        allocator_prs,
+        allocator_context,
+        &session_id,
+        b"ADa",
+        [3; 32],
+    )
+    .expect("start A");
+    let (b_state, b_message) = start(
+        Side::Claimant,
+        claimant_prs,
+        claimant_context,
+        &session_id,
+        b"ADb",
+        [4; 32],
+    )
+    .expect("start B");
+    let allocator = *finish(a_state, &b_message).expect("finish A").as_bytes();
+    let claimant = *finish(b_state, &a_message).expect("finish B").as_bytes();
+    (allocator, claimant)
 }

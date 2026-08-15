@@ -5,7 +5,17 @@
 //! context; this pure core owns neither a random-number generator nor I/O.
 
 use crate::wire::Side;
+use sha2::{Digest, Sha512};
 use std::fmt;
+use subtle::ConstantTimeEq;
+use x25519_dalek::x25519;
+use zeroize::Zeroizing;
+
+mod field;
+
+use field::elligator2_curve25519;
+
+const SHA512_INPUT_BLOCK_BYTES: usize = 128;
 
 /// Exact pinned CPace draft revision.
 pub const DRAFT_REVISION: u8 = 21;
@@ -28,8 +38,7 @@ pub struct CpaceMessage {
 }
 
 /// A completed 64-byte CPace intermediate session key.
-#[derive(Clone, Eq, PartialEq)]
-pub struct IntermediateSessionKey([u8; 64]);
+pub struct IntermediateSessionKey(Zeroizing<[u8; 64]>);
 
 impl IntermediateSessionKey {
     /// Borrow the exact 64 key bytes.
@@ -48,7 +57,7 @@ impl fmt::Debug for IntermediateSessionKey {
 /// Consumed local CPace state between share generation and completion.
 pub struct CpaceState {
     side: Side,
-    scalar: [u8; 32],
+    scalar: Zeroizing<[u8; 32]>,
     local_message: CpaceMessage,
     sid: Vec<u8>,
 }
@@ -68,13 +77,11 @@ impl fmt::Debug for CpaceState {
 /// CPace input or peer-validation failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CpaceError {
-    /// The pinned construction has not yet been implemented.
-    NotImplemented,
     /// A peer message claimed the same side as the receiver.
     SameSide,
     /// The peer point yielded the Curve25519 neutral element.
     InvalidPeerPoint,
-    /// A length could not be represented by the draft's length encoding.
+    /// A combined encoding length overflowed the current platform.
     LengthOverflow,
 }
 
@@ -88,43 +95,144 @@ impl std::error::Error for CpaceError {}
 
 /// Build the exact `CPace255` generator string from PRS, CI, and session ID.
 pub fn generator_string(
-    _prs: &[u8],
-    _channel_identifier: &[u8],
-    _session_id: &[u8],
-) -> Result<Vec<u8>, CpaceError> {
-    Err(CpaceError::NotImplemented)
+    prs: &[u8],
+    channel_identifier: &[u8],
+    session_id: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, CpaceError> {
+    let encoded_prefix_length = prepend_len_size(CPACE_DSI)?
+        .checked_add(prepend_len_size(prs)?)
+        .ok_or(CpaceError::LengthOverflow)?;
+    let padding_length =
+        SHA512_INPUT_BLOCK_BYTES.saturating_sub(encoded_prefix_length.saturating_add(1));
+    let capacity = [
+        prepend_len_size(CPACE_DSI)?,
+        prepend_len_size(prs)?,
+        leb128_size(padding_length)
+            .checked_add(padding_length)
+            .ok_or(CpaceError::LengthOverflow)?,
+        prepend_len_size(channel_identifier)?,
+        prepend_len_size(session_id)?,
+    ]
+    .into_iter()
+    .try_fold(0_usize, |sum, length| sum.checked_add(length))
+    .ok_or(CpaceError::LengthOverflow)?;
+
+    let mut result = Vec::with_capacity(capacity);
+    append_length_value(&mut result, CPACE_DSI);
+    append_length_value(&mut result, prs);
+    append_leb128(&mut result, padding_length);
+    result.resize(result.len() + padding_length, 0);
+    append_length_value(&mut result, channel_identifier);
+    append_length_value(&mut result, session_id);
+    Ok(Zeroizing::new(result))
 }
 
 /// Calculate the pinned CPace255 generator's encoded u-coordinate.
 pub fn calculate_generator(
-    _prs: &[u8],
-    _channel_identifier: &[u8],
-    _session_id: &[u8],
+    prs: &[u8],
+    channel_identifier: &[u8],
+    session_id: &[u8],
 ) -> Result<[u8; 32], CpaceError> {
-    Err(CpaceError::NotImplemented)
+    let generator_input = generator_string(prs, channel_identifier, session_id)?;
+    let digest = Sha512::digest(generator_input.as_slice());
+    let mut field_element = [0_u8; 32];
+    field_element.copy_from_slice(&digest[..32]);
+    field_element[31] &= 0x7f;
+    Ok(elligator2_curve25519(field_element))
 }
 
 /// Perform X25519 and reject the neutral element.
-pub fn x25519_scalar_mult_vfy(_scalar: [u8; 32], _point: [u8; 32]) -> Result<[u8; 32], CpaceError> {
-    Err(CpaceError::NotImplemented)
+pub fn x25519_scalar_mult_vfy(scalar: [u8; 32], point: [u8; 32]) -> Result<[u8; 32], CpaceError> {
+    let product = x25519(scalar, point);
+    if bool::from(product.ct_eq(&[0_u8; 32])) {
+        Err(CpaceError::InvalidPeerPoint)
+    } else {
+        Ok(product)
+    }
 }
 
 /// Begin one side of CPace with a caller-supplied fresh 32-byte scalar.
 pub fn start(
-    _side: Side,
-    _prs: &[u8],
-    _channel_identifier: &[u8],
-    _session_id: &[u8],
-    _associated_data: &[u8],
-    _fresh_scalar: [u8; 32],
+    side: Side,
+    prs: &[u8],
+    channel_identifier: &[u8],
+    session_id: &[u8],
+    associated_data: &[u8],
+    fresh_scalar: [u8; 32],
 ) -> Result<(CpaceState, CpaceMessage), CpaceError> {
-    Err(CpaceError::NotImplemented)
+    let generator = calculate_generator(prs, channel_identifier, session_id)?;
+    let share = x25519_scalar_mult_vfy(fresh_scalar, generator)?;
+    let message = CpaceMessage {
+        side,
+        share,
+        associated_data: associated_data.to_vec(),
+    };
+    let state = CpaceState {
+        side,
+        scalar: Zeroizing::new(fresh_scalar),
+        local_message: message.clone(),
+        sid: session_id.to_vec(),
+    };
+    Ok((state, message))
 }
 
 /// Complete CPace, consuming the local state and validating the peer share.
 pub fn finish(
-    _state: CpaceState,
-    _peer_message: &CpaceMessage,
+    state: CpaceState,
+    peer_message: &CpaceMessage,
 ) -> Result<IntermediateSessionKey, CpaceError> {
-    Err(CpaceError::NotImplemented)
+    if state.side == peer_message.side {
+        return Err(CpaceError::SameSide);
+    }
+
+    let shared_point = Zeroizing::new(x25519_scalar_mult_vfy(*state.scalar, peer_message.share)?);
+    let (allocator, claimant) = match state.side {
+        Side::Allocator => (&state.local_message, peer_message),
+        Side::Claimant => (peer_message, &state.local_message),
+    };
+
+    let mut key_input = Zeroizing::new(Vec::new());
+    append_length_value(&mut key_input, CPACE_ISK_DSI);
+    append_length_value(&mut key_input, &state.sid);
+    append_length_value(&mut key_input, shared_point.as_slice());
+    append_length_value(&mut key_input, &allocator.share);
+    append_length_value(&mut key_input, &allocator.associated_data);
+    append_length_value(&mut key_input, &claimant.share);
+    append_length_value(&mut key_input, &claimant.associated_data);
+
+    Ok(IntermediateSessionKey(Zeroizing::new(
+        Sha512::digest(key_input.as_slice()).into(),
+    )))
+}
+
+fn prepend_len_size(value: &[u8]) -> Result<usize, CpaceError> {
+    leb128_size(value.len())
+        .checked_add(value.len())
+        .ok_or(CpaceError::LengthOverflow)
+}
+
+fn leb128_size(mut value: usize) -> usize {
+    let mut size = 1;
+    while value >= 0x80 {
+        size += 1;
+        value >>= 7;
+    }
+    size
+}
+
+fn append_leb128(output: &mut Vec<u8>, mut value: usize) {
+    loop {
+        let low_bits = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            output.push(low_bits);
+            return;
+        }
+        output.push(low_bits | 0x80);
+    }
+}
+
+fn append_length_value(output: &mut Vec<u8>, value: &[u8]) {
+    append_leb128(output, value.len());
+    output.extend_from_slice(value);
 }
