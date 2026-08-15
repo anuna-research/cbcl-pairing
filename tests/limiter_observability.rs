@@ -6,6 +6,8 @@ use cbcl_pairing::{
     },
     observability::{CapacityCaps, RelayGauges, RelayObservability, RelayOutcome},
 };
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 
 const OPERATOR_KEY: [u8; 32] = [0x55; 32];
 
@@ -92,12 +94,12 @@ fn test_015_keyed_dimensions_have_independent_budgets_and_fixed_cooldown() {
         })
     );
     assert_eq!(
-        limiter.check(Operation::Put, address, 401),
-        Ok(LimitDecision::Cooldown { retry_at: 402 })
-    );
-    assert_eq!(
         limiter.check(Operation::Ack, address, 102),
         Ok(LimitDecision::Allowed { remaining: 1 })
+    );
+    assert_eq!(
+        limiter.check(Operation::Put, address, 401),
+        Ok(LimitDecision::Cooldown { retry_at: 402 })
     );
     assert_eq!(
         limiter.check(Operation::Put, address, 402),
@@ -105,10 +107,18 @@ fn test_015_keyed_dimensions_have_independent_budgets_and_fixed_cooldown() {
     );
 
     let snapshot = limiter.snapshot();
-    assert_eq!(snapshot.entry_count, 2);
-    assert_ne!(
-        snapshot.dimensions[0].1.into_bytes(),
-        *address.first_chunk::<32>().unwrap_or(&[0; 32])
+    assert_eq!(snapshot.entry_count, 1);
+    let put_key = snapshot
+        .dimensions
+        .iter()
+        .find(|(operation, _)| *operation == Operation::Put)
+        .expect("put dimension")
+        .1;
+    let mut expected = Hmac::<Sha256>::new_from_slice(&OPERATOR_KEY).expect("HMAC key");
+    expected.update(address);
+    assert_eq!(
+        put_key.into_bytes().as_slice(),
+        expected.finalize().into_bytes().as_slice()
     );
 }
 
@@ -119,36 +129,37 @@ fn test_015_every_operation_is_limited_and_entry_cap_survives_churn() {
 
     for (index, operation) in Operation::ALL.into_iter().enumerate() {
         let address = format!("192.0.2.{}:443", index + 1);
+        let base = index as u64 * 3 + 1;
         assert!(matches!(
-            limiter.check(operation, address.as_bytes(), 1),
+            limiter.check(operation, address.as_bytes(), base),
             Ok(LimitDecision::Allowed { .. })
         ));
         assert!(matches!(
-            limiter.check(operation, address.as_bytes(), 2),
+            limiter.check(operation, address.as_bytes(), base + 1),
             Ok(LimitDecision::Allowed { .. })
         ));
         assert_eq!(
-            limiter.check(operation, address.as_bytes(), 3),
+            limiter.check(operation, address.as_bytes(), base + 2),
             Ok(LimitDecision::Cooldown {
-                retry_at: 3 + COOLDOWN_SECONDS,
+                retry_at: base + 2 + COOLDOWN_SECONDS,
             })
         );
     }
     assert_eq!(limiter.snapshot().entry_count, Operation::ALL.len());
     assert_eq!(
-        limiter.check(Operation::Bind, b"192.0.2.250:443", 4),
+        limiter.check(Operation::Bind, b"192.0.2.250:443", 25),
         Ok(LimitDecision::AtCapacity)
     );
     assert_eq!(limiter.snapshot().entry_count, Operation::ALL.len());
 
     assert_eq!(limiter.sweep(302).expect("cooldowns remain"), 0);
     assert_eq!(
-        limiter.sweep(313).expect("inactive entries sweep"),
+        limiter.sweep(334).expect("inactive entries sweep"),
         Operation::ALL.len()
     );
     assert_eq!(limiter.snapshot().entry_count, 0);
     assert!(matches!(
-        limiter.check(Operation::Bind, b"192.0.2.250:443", 313),
+        limiter.check(Operation::Bind, b"192.0.2.250:443", 334),
         Ok(LimitDecision::Allowed { .. })
     ));
 }

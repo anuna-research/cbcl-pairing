@@ -146,18 +146,51 @@ impl RelayObservability {
     }
 
     /// Record one recognised operation and return its safe log event.
-    pub fn record(&mut self, _operation: Operation, _outcome: RelayOutcome) -> RelayLogEvent {
-        panic!("limiter-observability Red Gate")
+    pub fn record(&mut self, operation: Operation, outcome: RelayOutcome) -> RelayLogEvent {
+        let counter = &mut self.counters[operation.index()][outcome.index()];
+        *counter = counter.saturating_add(1);
+        RelayLogEvent { operation, outcome }
     }
 
     /// Replace aggregate gauges from current bounded relay state.
-    pub fn set_gauges(&mut self, _gauges: RelayGauges) {
-        panic!("limiter-observability Red Gate")
+    pub const fn set_gauges(&mut self, gauges: RelayGauges) {
+        self.gauges = gauges;
     }
 
     /// Return counters, gauges, and threshold alerts.
     #[must_use]
     pub fn metrics(&self) -> RelayMetrics {
-        panic!("limiter-observability Red Gate")
+        let mut operations = Vec::new();
+        for operation in Operation::ALL {
+            for outcome in RelayOutcome::ALL {
+                let count = self.counters[operation.index()][outcome.index()];
+                if count != 0 {
+                    operations.push(OperationMetric {
+                        operation,
+                        outcome,
+                        count,
+                    });
+                }
+            }
+        }
+        RelayMetrics {
+            operations,
+            gauges: self.gauges,
+            alerts: CapacityAlerts {
+                open_mailboxes: at_eighty_percent(
+                    self.gauges.open_mailboxes,
+                    self.caps.open_mailboxes,
+                ),
+                queue_bytes: at_eighty_percent(self.gauges.queue_bytes, self.caps.queue_bytes),
+                limiter_entries: at_eighty_percent(
+                    self.gauges.limiter_entries,
+                    self.caps.limiter_entries,
+                ),
+            },
+        }
     }
+}
+
+const fn at_eighty_percent(value: u64, cap: u64) -> bool {
+    cap != 0 && (value as u128) * 5 >= (cap as u128) * 4
 }

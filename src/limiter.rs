@@ -1,5 +1,10 @@
 //! Pure operator-keyed, bounded mailbox-operation limiter.
 
+use std::collections::{BTreeMap, VecDeque};
+
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
 /// Mandatory cooldown after an operation budget is exceeded.
 pub const COOLDOWN_SECONDS: u64 = 300;
 
@@ -152,6 +157,8 @@ pub enum LimiterError {
     TimeReversal,
     /// Cooldown expiry overflowed absolute time.
     TimeOverflow,
+    /// Canonical peer address input was empty.
+    EmptyPeerAddress,
 }
 
 impl std::fmt::Display for LimiterError {
@@ -162,39 +169,172 @@ impl std::fmt::Display for LimiterError {
 
 impl std::error::Error for LimiterError {}
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Entry {
+    attempts: VecDeque<u64>,
+    cooldown_until: Option<u64>,
+}
+
 /// One shared limiter across every mailbox operation.
-#[derive(Debug)]
 pub struct Limiter {
-    _private: (),
+    operator_key: [u8; 32],
+    config: LimiterConfig,
+    entries: BTreeMap<(Operation, PeerKey), Entry>,
+    last_now: Option<u64>,
+    last_sweep: Option<u64>,
+}
+
+impl std::fmt::Debug for Limiter {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Limiter")
+            .field("operator_key", &"REDACTED")
+            .field("config", &self.config)
+            .field("snapshot", &self.snapshot())
+            .field("last_now", &self.last_now)
+            .field("last_sweep", &self.last_sweep)
+            .finish()
+    }
 }
 
 impl Limiter {
     /// Create a limiter using a private operator key.
-    pub fn new(_operator_key: [u8; 32], _config: LimiterConfig) -> Result<Self, LimiterError> {
-        Err(LimiterError::NotImplemented)
+    pub fn new(operator_key: [u8; 32], config: LimiterConfig) -> Result<Self, LimiterError> {
+        if config.entry_cap == 0
+            || config.sweep_interval_seconds == 0
+            || config
+                .policies
+                .iter()
+                .any(|policy| policy.limit == 0 || policy.window_seconds == 0)
+        {
+            return Err(LimiterError::InvalidConfiguration);
+        }
+        Ok(Self {
+            operator_key,
+            config,
+            entries: BTreeMap::new(),
+            last_now: None,
+            last_sweep: None,
+        })
     }
 
     /// Check and record one operation for canonical peer-address bytes.
     pub fn check(
         &mut self,
-        _operation: Operation,
-        _canonical_peer_address: &[u8],
-        _now: u64,
+        operation: Operation,
+        canonical_peer_address: &[u8],
+        now: u64,
     ) -> Result<LimitDecision, LimiterError> {
-        Err(LimiterError::NotImplemented)
+        if canonical_peer_address.is_empty() {
+            return Err(LimiterError::EmptyPeerAddress);
+        }
+        self.observe_time(now)?;
+        if self
+            .last_sweep
+            .is_none_or(|last| now.saturating_sub(last) >= self.config.sweep_interval_seconds)
+        {
+            self.sweep_inner(now);
+            self.last_sweep = Some(now);
+        }
+
+        let peer_key = self.peer_key(canonical_peer_address);
+        let dimension = (operation, peer_key);
+        let policy = self.config.policies[operation.index()];
+        if let Some(entry) = self.entries.get_mut(&dimension) {
+            if let Some(retry_at) = entry.cooldown_until {
+                if now < retry_at {
+                    return Ok(LimitDecision::Cooldown { retry_at });
+                }
+                entry.cooldown_until = None;
+                entry.attempts.clear();
+            }
+            prune_attempts(entry, policy.window_seconds, now);
+            if entry.attempts.len() >= policy.limit as usize {
+                let retry_at = now
+                    .checked_add(COOLDOWN_SECONDS)
+                    .ok_or(LimiterError::TimeOverflow)?;
+                entry.cooldown_until = Some(retry_at);
+                return Ok(LimitDecision::Cooldown { retry_at });
+            }
+            entry.attempts.push_back(now);
+            return Ok(LimitDecision::Allowed {
+                remaining: policy.limit - entry.attempts.len() as u32,
+            });
+        }
+
+        if self.entries.len() >= self.config.entry_cap {
+            return Ok(LimitDecision::AtCapacity);
+        }
+        let mut attempts = VecDeque::new();
+        attempts.push_back(now);
+        self.entries.insert(
+            dimension,
+            Entry {
+                attempts,
+                cooldown_until: None,
+            },
+        );
+        Ok(LimitDecision::Allowed {
+            remaining: policy.limit - 1,
+        })
     }
 
     /// Periodically remove inactive dimensions.
-    pub fn sweep(&mut self, _now: u64) -> Result<usize, LimiterError> {
-        Err(LimiterError::NotImplemented)
+    pub fn sweep(&mut self, now: u64) -> Result<usize, LimiterError> {
+        self.observe_time(now)?;
+        let removed = self.sweep_inner(now);
+        self.last_sweep = Some(now);
+        Ok(removed)
     }
 
     /// Return pseudonymous bounded state for gauges and conformance tests.
     #[must_use]
     pub fn snapshot(&self) -> LimiterSnapshot {
         LimiterSnapshot {
-            entry_count: 0,
-            dimensions: Vec::new(),
+            entry_count: self.entries.len(),
+            dimensions: self.entries.keys().copied().collect(),
         }
+    }
+
+    fn observe_time(&mut self, now: u64) -> Result<(), LimiterError> {
+        if self.last_now.is_some_and(|last| now < last) {
+            return Err(LimiterError::TimeReversal);
+        }
+        self.last_now = Some(now);
+        Ok(())
+    }
+
+    fn peer_key(&self, canonical_peer_address: &[u8]) -> PeerKey {
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(&self.operator_key)
+            .expect("HMAC accepts every fixed-size key");
+        mac.update(canonical_peer_address);
+        PeerKey(mac.finalize().into_bytes().into())
+    }
+
+    fn sweep_inner(&mut self, now: u64) -> usize {
+        let before = self.entries.len();
+        let policies = self.config.policies;
+        self.entries.retain(|(operation, _), entry| {
+            if entry.cooldown_until.is_some_and(|retry_at| now >= retry_at) {
+                return false;
+            }
+            if entry.cooldown_until.is_some() {
+                return true;
+            }
+            prune_attempts(entry, policies[operation.index()].window_seconds, now);
+            !entry.attempts.is_empty()
+        });
+        before - self.entries.len()
+    }
+}
+
+fn prune_attempts(entry: &mut Entry, window_seconds: u64, now: u64) {
+    while entry
+        .attempts
+        .front()
+        .is_some_and(|timestamp| now.saturating_sub(*timestamp) >= window_seconds)
+    {
+        entry.attempts.pop_front();
     }
 }
