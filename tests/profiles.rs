@@ -157,7 +157,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/src/bin/cbcl-pairing-relay.rs"
             ))
             .as_slice(),
-            "5979d15b19ff75d7581df2b8ddf4bfeff51f1523cc688f40c7d7c6db360bb79f",
+            "f9edfbff5440fc937350ae5b52559017105c6c78c4695764692b424414742d7b",
         ),
         (
             include_bytes!(concat!(

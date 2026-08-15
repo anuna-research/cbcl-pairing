@@ -65,6 +65,7 @@ pub fn component_status(name: &str) -> ComponentStatus {
         "cbcl-protocol" => ComponentStatus::Implemented,
         "endpoint-reducer" => ComponentStatus::Implemented,
         "application-profiles" => ComponentStatus::Implemented,
+        "relay-service" => ComponentStatus::Implemented,
         _ => ComponentStatus::NotImplemented,
     }
 }

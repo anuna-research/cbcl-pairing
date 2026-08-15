@@ -13,7 +13,7 @@ path = "src/lib.rs"
 [features]
 default = ["std"]
 std = []
-relay = ["std"]
+relay = ["std", "dep:getrandom"]
 
 [dependencies]
 aes-gcm = { version = "=0.11.0", default-features = false, features = ["aes", "alloc", "zeroize"] }
@@ -24,6 +24,7 @@ cddl-cat = { version = "0.7", default-features = false, features = ["ciborium"] 
 ciborium = "0.2"
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["alloc", "fast", "zeroize"] }
 fiat-crypto = { version = "=0.3.0", default-features = false }
+getrandom = { version = "=0.3.4", optional = true }
 hmac = { version = "=0.13.0", features = ["zeroize"] }
 hkdf = "=0.13.0"
 sha2 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
