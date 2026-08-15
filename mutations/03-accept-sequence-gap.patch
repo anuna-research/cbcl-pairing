@@ -1,0 +1,11 @@
+diff --git a/src/mailbox.rs b/src/mailbox.rs
+--- a/src/mailbox.rs
++++ b/src/mailbox.rs
+@@ -510,6 +510,3 @@ pub fn transition(
+             if seq > member.next_seq {
+-                return Err(MailboxError::SequenceGap {
+-                    expected: member.next_seq,
+-                    got: seq,
+-                });
++                // MUTANT: accept a non-contiguous sequence.
+             }

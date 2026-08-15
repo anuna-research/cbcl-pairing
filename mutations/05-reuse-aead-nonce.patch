@@ -1,0 +1,12 @@
+diff --git a/src/channel.rs b/src/channel.rs
+--- a/src/channel.rs
++++ b/src/channel.rs
+@@ -231,7 +231,7 @@ impl SecureChannel {
+                 },
+             )
+             .map_err(|_| ChannelError::Encryption)?;
+-        self.next_send_counter = counter.checked_add(1);
++        self.next_send_counter = Some(counter);
+         Ok(ChannelFrame::Sealed {
+             direction,
+             counter,

@@ -77,6 +77,8 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 cargo doc --no-deps --all-features
+tools/run-mutations.sh
+tools/run-fuzz-budgets.sh
 ```
 
 The library is not published on crates.io. During development, use a path or
@@ -88,6 +90,9 @@ cbcl-pairing = { path = "../cbcl-pairing" }
 ```
 
 Do not enable a production pairing flow merely because the crate compiles.
+The mutation command makes seven deliberately insecure copies and succeeds only
+when every targeted test kills its mutant. The fuzz command uses the installed
+nightly toolchain and `cargo-fuzz`; it does not retain corpora in Git.
 
 ## Documentation
 

@@ -1,0 +1,33 @@
+[package]
+name = "cbcl-pairing-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+cbcl-pairing = { path = ".." }
+
+[[bin]]
+name = "wire_recognition"
+path = "fuzz_targets/wire_recognition.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mailbox_transitions"
+path = "fuzz_targets/mailbox_transitions.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "channel_receiver"
+path = "fuzz_targets/channel_receiver.rs"
+test = false
+doc = false
+bench = false

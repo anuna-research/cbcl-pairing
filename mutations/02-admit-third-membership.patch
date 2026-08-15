@@ -1,0 +1,20 @@
+diff --git a/src/mailbox.rs b/src/mailbox.rs
+--- a/src/mailbox.rs
++++ b/src/mailbox.rs
+@@ -461,2 +461,15 @@ pub fn transition(
+-                Some(_) => Ok(next.terminate(CloseReason::Crowded)),
++                Some(_) => {
++                    next.claimant = Some(MemberState {
++                        hash: claimant_hash,
++                        next_seq: 0,
++                        frames: Vec::new(),
++                    });
++                    Ok(MailboxTransition {
++                        state: Some(next),
++                        effects: vec![MailboxEffect::Claimed {
++                            membership: Membership::Claimant,
++                            expires_at: state.expires_at,
++                        }],
++                    })
++                }
+             }

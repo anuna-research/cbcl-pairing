@@ -1,0 +1,22 @@
+diff --git a/src/endpoint.rs b/src/endpoint.rs
+--- a/src/endpoint.rs
++++ b/src/endpoint.rs
+@@ -546,5 +546,18 @@ impl EndpointReducer {
+         if self.side != Side::Allocator {
+             return Err(ReducerError::Phase);
+         }
+         let intent = self.intent.clone().ok_or(ReducerError::Phase)?;
++        if self.decision.is_none() {
++            let recognised = self
++                .profile
++                .recognise_payload(&intent.profile_binding, payload)
++                .map_err(|_| ReducerError::Profile)?;
++            if self.profile.authorize_payload(recognised).is_ok() {
++                return Ok(ChannelFrame::Sealed {
++                    direction: crate::wire::Direction::AllocatorToClaimant,
++                    counter: 0,
++                    ciphertext: vec![0; 17],
++                });
++            }
++        }
+         let decision = self.decision.clone().ok_or(ReducerError::Phase)?;

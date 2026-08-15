@@ -394,6 +394,9 @@ fn test_009_decline_erases_both_endpoints_and_releases_no_payload() {
     let decline_effects = claimant.decide(Decision::Decline).expect("decline");
     let decline_frame = extract_frame(&decline_effects);
     assert!(decline_effects.contains(&EndpointEffect::CloseMailbox));
+    assert!(!decline_effects
+        .iter()
+        .any(|effect| matches!(effect, EndpointEffect::DeliverGrant(_))));
     assert_eq!(claimant.terminal_reason(), Some(TerminalReason::Declined));
     assert!(claimant.secrets_erased());
     assert_eq!(claimant.delivered_payloads(), 0);

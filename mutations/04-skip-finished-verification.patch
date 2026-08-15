@@ -1,0 +1,10 @@
+diff --git a/src/channel.rs b/src/channel.rs
+--- a/src/channel.rs
++++ b/src/channel.rs
+@@ -152,5 +152,3 @@ impl PendingChannel {
+-        if peer_finished.len() != 64
+-            || !bool::from(self.peer_finished.as_slice().ct_eq(peer_finished))
+-        {
++        if peer_finished.len() != 64 {
+             return Err(ChannelError::FinishedMismatch);
+         }

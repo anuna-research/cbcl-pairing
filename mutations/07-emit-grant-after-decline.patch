@@ -1,0 +1,14 @@
+diff --git a/src/endpoint.rs b/src/endpoint.rs
+--- a/src/endpoint.rs
++++ b/src/endpoint.rs
+@@ -530,5 +530,10 @@ impl EndpointReducer {
+             self.terminate(TerminalReason::Declined);
+             Ok(vec![
+                 EndpointEffect::SendFrame(frame),
++                EndpointEffect::DeliverGrant(AuthorisedGrant {
++                    application: self.application.clone(),
++                    payload_type: "mutation/grant-after-decline".into(),
++                    body: vec![1],
++                }),
+                 EndpointEffect::CloseMailbox,
+             ])

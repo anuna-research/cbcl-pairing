@@ -1,0 +1,24 @@
+diff --git a/src/endpoint.rs b/src/endpoint.rs
+--- a/src/endpoint.rs
++++ b/src/endpoint.rs
+@@ -181,5 +181,6 @@ struct IntentRecord {
+ struct IntentRecord {
+     digest: [u8; 32],
+     control_hash: String,
+     profile_binding: ProfileBinding,
++    authority_summary: String,
+ }
+@@ -470,5 +471,6 @@ impl EndpointReducer {
+         self.intent = Some(IntentRecord {
+             digest,
+             control_hash: admission,
+             profile_binding,
++            authority_summary: intent.authority_summary.clone(),
+         });
+@@ -890,5 +892,6 @@ impl EndpointReducer {
+         self.intent = Some(IntentRecord {
+             digest,
+             control_hash: control_hash.into(),
+             profile_binding,
++            authority_summary: value.authority_summary,
+         });
