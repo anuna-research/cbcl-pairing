@@ -25,11 +25,13 @@ CPace, Finished, projected intent, explicit consent, payload verification, and
 mailbox closure. It includes the exact 22-bit agent carrier statement and does
 not present deterministic fixture entropy as production randomness.
 
-The operator guide records the private-listener wire, key-file constraints,
-disabled-by-default allocation, conformance-only flag, fixed caps, safe logs,
-failure/recovery semantics, metadata exposure, and multi-operator model. The
-security guide records claims, exclusions, endpoint and relay trust boundaries,
-entropy and erasure obligations, and every mandatory production gate.
+The operator guide records both the standard binary-WebSocket and private TCP
+shells, key-file constraints, memory/directory storage, atomic recovery,
+emergency closure, disabled-by-default allocation, conformance-only flag, fixed
+caps, safe logs, failure/recovery semantics, metadata exposure, and the
+multi-operator model. The security guide records claims, exclusions, endpoint
+and relay trust boundaries, entropy and erasure obligations, and every
+mandatory production gate.
 
 The `derive_pairing_context` example compiles under the all-feature target gate.
 Rustdoc builds successfully, the full all-feature suite remains green, and all

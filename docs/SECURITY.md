@@ -80,9 +80,10 @@ telemetry, crash dumps, backups, and foreign-language bindings. Audit those
 copies explicitly.
 
 Persist only the secret-free `InvitationRecord` for crash-resume consumption.
-Relay persistence, if added, must contain only blind mailbox-domain state and
-must delete acknowledged and terminal bodies immediately and all remaining
-state at original expiry.
+The included relay store persists only blind mailbox-domain state; custom stores
+must preserve that boundary. Every adapter must delete acknowledged and
+terminal bodies immediately, remove interrupted temporary records, and delete
+all remaining state at original expiry.
 
 ## Mandatory open gates
 

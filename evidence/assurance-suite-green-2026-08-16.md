@@ -1,7 +1,8 @@
 # Assurance-suite evidence
 
 - Date: 2026-08-16
-- Baseline commit: `578c168`
+- Initial baseline commit: `578c168`
+- Completion-audit implementation commits: `ec43521`, `d5e53ed`
 - Component: `assurance-suite`
 - Commands:
   - `cargo fmt --check`
@@ -49,6 +50,15 @@ test rather than by a compiler failure:
 
 The runner reports `MUTATION GATE OK: 7/7 killed`, and the Forgejo workflow now
 runs it after the complete all-feature test suite.
+
+The completion audit reran all three unchanged budgets and all seven mutants
+after the durable store, WebSocket shell, explicit endpoint expiry/cancellation,
+Finished-replay fix, and expanded TEST-018 vector landed. All budgets again
+completed without a crash or sanitizer finding and all 7/7 mutants were killed.
+
+Both the root crate and fuzz harness now use exact direct dependency versions
+and committed lockfiles. `cargo deny` 0.20.2 reports advisories, bans/duplicates,
+licences, and sources OK for both manifests; CI runs both graphs.
 
 ## Scope boundary
 

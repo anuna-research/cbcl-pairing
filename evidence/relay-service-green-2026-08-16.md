@@ -5,6 +5,8 @@ Focused commands:
 ```text
 cargo test --test relay_service --all-features
 cargo test --test relay_process --features relay
+cargo test --test websocket_process --all-features
+cargo test --test storage --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
@@ -33,6 +35,18 @@ Implemented boundary:
   and credential-profile opaque bytes with identical protocol results and no
   body/application leakage in logs.
 
-The TCP listener is an internal reference transport. A deployment terminates
-TLS/WSS in front of it; production remains prohibited by the retained Tier-1
-gates.
+The same blind service now has two reference shells: the existing private
+length-delimited TCP listener and an RFC 6455 binary-WebSocket listener. A real
+two-client process test proves asynchronous WebSocket routing, exact canonical
+CBOR messages, text rejection, and application-blind logs. Both require TLS/WSS
+termination by the deployment.
+
+`MailboxStore` now has memory and canonical directory-backed adapters. The file
+adapter writes private records through fsync plus atomic rename, reconstructs
+queued and acknowledged state after restart, removes interrupted body-bearing
+temporary records, retains no raw membership token, and reaps all files at the
+original expiry. The runtime allocation kill switch preserves existing
+mailboxes; emergency close removes bodies and retains only bounded tombstones.
+
+These are local conformance deployables. Production remains prohibited by the
+retained Tier-1 gates.
