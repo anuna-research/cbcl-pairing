@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod mailbox;
 pub mod wire;
 
 /// Exact normative role-free bootstrap dialect source.
