@@ -14,6 +14,7 @@ pub mod limiter;
 pub mod mailbox;
 pub mod observability;
 pub mod profile;
+pub mod relay;
 pub mod wire;
 
 /// Exact normative role-free bootstrap dialect source.
