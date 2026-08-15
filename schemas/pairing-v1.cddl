@@ -1,0 +1,142 @@
+pairing-invitation = {
+  "version": 1,
+  "suite": "CPACE25519-SHA512-D21",
+  "application": application-id,
+  "relay-origin": relay-origin,
+  "locator": locator,
+  "secret": bstr .size (1..64),
+  ? "expected-allocator-key": bstr .size 32,
+  ? "expected-claimant-key": bstr .size 32
+}
+
+application-id = tstr .size (1..96)
+relay-origin   = tstr .size (1..255)
+locator        = [0, mailbox-id] / [1, 0..999999999]
+mailbox-id     = bstr .size 32
+
+client-message = bind / allocate / claim / open / put / ack / close / ping
+
+bind = {
+  "type": "bind",
+  "version": 1
+}
+
+allocate = {
+  "type": "allocate",
+  "locator-mode": 0..1,
+  ? "ttl-seconds": 60..600
+}
+
+claim = {
+  "type": "claim",
+  "locator": locator
+}
+
+open = {
+  "type": "open",
+  "mailbox-id": mailbox-id,
+  "membership-token": membership-token
+}
+
+put = {
+  "type": "put",
+  "seq": 0..15,
+  "body": bstr .size (1..69632)
+}
+
+ack = {
+  "type": "ack",
+  "peer-seq": 0..15
+}
+
+close = { "type": "close" }
+ping  = { "type": "ping" }
+
+server-message = welcome / allocated / claimed / frame / acknowledged /
+                 closed / error / pong
+
+welcome = { "type": "welcome", "version": 1 }
+
+allocated = {
+  "type": "allocated",
+  "mailbox-id": mailbox-id,
+  "membership-token": membership-token,
+  ? "nameplate": 0..999999999,
+  "expires-at": uint
+}
+
+claimed = {
+  "type": "claimed",
+  "mailbox-id": mailbox-id,
+  "membership-token": membership-token,
+  "expires-at": uint
+}
+
+frame = {
+  "type": "frame",
+  "peer-seq": 0..15,
+  "body": bstr .size (1..69632)
+}
+
+acknowledged = { "type": "acknowledged", "seq": 0..15 }
+closed = { "type": "closed", "reason": "closed" / "crowded" /
+                                          "expired" / "conflict" }
+error = { "type": "error", "code": 400 / 404 / 409 / 410 / 413 / 429 / 503 }
+pong = { "type": "pong" }
+
+membership-token = bstr .size 32
+
+cpace-channel-frame = cpace-frame / finished-frame / sealed-frame
+
+cpace-frame = {
+  "v": 1,
+  "kind": "cpace",
+  "role": 0..1,
+  "control": bstr .size (1..2048),
+  "message": bstr .size (1..65536)
+}
+
+finished-frame = {
+  "v": 1,
+  "kind": "finished",
+  "role": 0..1,
+  "control": bstr .size (1..2048),
+  "value": bstr .size 64
+}
+
+sealed-frame = {
+  "v": 1,
+  "kind": "sealed",
+  "direction": 0..1,
+  "counter": uint,
+  "ciphertext": bstr .size (17..69572)
+}
+
+sealed-plaintext = {
+  "control": bstr .size (1..2048),
+  ? "body": bstr .size (1..65536)
+}
+
+pairing-intent = {
+  "type": "intent",
+  "application": application-id,
+  "action": tstr .size (1..64),
+  "allocator-claim": bstr .size (1..8192),
+  "claimant-claim": bstr .size (1..8192),
+  "authority-summary": tstr .size (1..512),
+  "intent-nonce": bstr .size 32
+}
+
+pairing-decision = {
+  "type": "decision",
+  "intent-digest": bstr .size 32,
+  "decision": "approve" / "decline"
+}
+
+application-payload = {
+  "type": "payload",
+  "intent-digest": bstr .size 32,
+  "payload-type": tstr .size (1..96),
+  "body": bstr .size (1..64512)
+}
+

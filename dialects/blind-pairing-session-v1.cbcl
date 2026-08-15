@@ -1,0 +1,47 @@
+(define blind-pairing-session/v1 (cbcl) @anuna-research
+  (:roles (allocator claimant))
+  (:resource-requirements
+    ((max-depth 8) (max-expansion-size 2048) (verification-time 20)))
+
+  (extend pairing-intent (ceremony body-digest body-length)
+    :from allocator :to claimant
+    (tell @claimant :ceremony ceremony
+      :body-digest body-digest :body-length body-length
+      :domain blind-pairing-session/v1))
+  (extend pairing-approve (ceremony body-digest body-length)
+    :from claimant :to allocator
+    (tell @allocator :ceremony ceremony
+      :body-digest body-digest :body-length body-length
+      :domain blind-pairing-session/v1))
+  (extend pairing-decline (ceremony body-digest body-length)
+    :from claimant :to allocator
+    (tell @allocator :ceremony ceremony
+      :body-digest body-digest :body-length body-length
+      :domain blind-pairing-session/v1))
+  (extend pairing-payload (ceremony body-digest body-length)
+    :from allocator :to claimant
+    (tell @claimant :ceremony ceremony
+      :body-digest body-digest :body-length body-length
+      :domain blind-pairing-session/v1))
+
+  (protocol
+    (then begin pairing-intent)
+    (then pairing-intent (any pairing-approve pairing-decline))
+    (then pairing-approve pairing-payload))
+
+  (shape pairing-intent
+    (require :ceremony string)
+    (require :body-digest string)
+    (require :body-length number))
+  (shape pairing-approve
+    (require :ceremony string)
+    (require :body-digest string)
+    (require :body-length number))
+  (shape pairing-decline
+    (require :ceremony string)
+    (require :body-digest string)
+    (require :body-length number))
+  (shape pairing-payload
+    (require :ceremony string)
+    (require :body-digest string)
+    (require :body-length number)))

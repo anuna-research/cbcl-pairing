@@ -1,0 +1,30 @@
+[package]
+name = "cbcl-pairing"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0 OR MIT"
+description = "Reusable blind pairing endpoints and relay for SPEC-072"
+
+[lib]
+name = "cbcl_pairing"
+path = "src/lib.rs"
+
+[features]
+default = ["std"]
+std = []
+relay = ["std"]
+
+[dependencies]
+cbcl-core = { git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
+cbcl-parser = { git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
+sha2 = "0.10"
+
+[dev-dependencies]
+hex = "0.4"
+
+[[bin]]
+name = "cbcl-pairing-relay"
+path = "src/bin/cbcl-pairing-relay.rs"
+required-features = ["relay"]
+

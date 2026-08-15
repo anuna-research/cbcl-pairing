@@ -1,0 +1,45 @@
+(define blind-pairing-bootstrap/v1 (cbcl) @anuna-research
+  (:resource-requirements
+    ((max-depth 8) (max-expansion-size 2048) (verification-time 20)))
+
+  (extend cpace-a (ceremony body-digest body-length)
+    (tell @peer :ceremony ceremony :role allocator
+      :body-digest body-digest :body-length body-length
+      :domain blind-pairing-bootstrap/v1))
+  (extend cpace-b (ceremony body-digest body-length)
+    (tell @peer :ceremony ceremony :role claimant
+      :body-digest body-digest :body-length body-length
+      :domain blind-pairing-bootstrap/v1))
+  (extend finished-a (ceremony body-digest body-length)
+    (tell @peer :ceremony ceremony :role allocator
+      :body-digest body-digest :body-length body-length
+      :domain blind-pairing-bootstrap/v1))
+  (extend finished-b (ceremony body-digest body-length)
+    (tell @peer :ceremony ceremony :role claimant
+      :body-digest body-digest :body-length body-length
+      :domain blind-pairing-bootstrap/v1))
+
+  (protocol
+    (then begin (all cpace-a cpace-b))
+    (then (all cpace-a cpace-b) (all finished-a finished-b)))
+
+  (shape cpace-a
+    (require :ceremony string)
+    (require :role symbol)
+    (require :body-digest string)
+    (require :body-length number))
+  (shape cpace-b
+    (require :ceremony string)
+    (require :role symbol)
+    (require :body-digest string)
+    (require :body-length number))
+  (shape finished-a
+    (require :ceremony string)
+    (require :role symbol)
+    (require :body-digest string)
+    (require :body-length number))
+  (shape finished-b
+    (require :ceremony string)
+    (require :role symbol)
+    (require :body-digest string)
+    (require :body-length number)))

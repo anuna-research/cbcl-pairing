@@ -1,0 +1,10 @@
+application-id = reversed-domain "/" profile "/v" version
+reversed-domain = dns-label 1*("." dns-label)
+dns-label = ALPHA / (ALPHA *(ALPHA / DIGIT / "-") (ALPHA / DIGIT))
+profile = ALPHA *(ALPHA / DIGIT / "-")
+version = DIGIT / (DIGIT DIGIT)
+
+ceremony-id = 64lower-hex
+body-digest = %s"sha256:" 64lower-hex
+lower-hex   = DIGIT / %x61-66
+
