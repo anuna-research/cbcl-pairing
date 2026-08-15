@@ -58,7 +58,10 @@ The nested CPace share is a canonical `CpaceMessage`, encoded with
 
 For a SPEC-072 ceremony, call `cpace::start_pairing`. It derives every CPace
 application input from the invitation and resolved mailbox and checks the
-peer's exact associated data in `cpace::finish`. The lower-level `cpace::start`
+peer's exact associated data in `cpace::finish`. Use
+`PendingChannel::new_pairing` for the same reason: it derives the one canonical
+secure-channel public context instead of accepting application-selected bytes.
+The lower-level `cpace::start` and `PendingChannel::new`
 exists for official vectors and specialised protocol work; ordinary
 applications should not invent their own `CI`, `sid`, or associated data.
 

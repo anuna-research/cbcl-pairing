@@ -65,6 +65,8 @@ does not duplicate the legal predecessor graph owned by the CBCL dialects.
 - A direct invitation binds its exact mailbox. CPace context binds the suite,
   application, relay origin, resolved mailbox, ordered sides, and expected key
   digests.
+- The secure-channel public context independently binds the suite, application,
+  relay origin, resolved mailbox, and both optional expected key digests.
 
 The exact CPace construction is revision 21 of an Internet-Draft. A later draft
 or RFC does not silently update this implementation.

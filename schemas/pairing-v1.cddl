@@ -95,6 +95,17 @@ cpace-message = [
   bstr .size (1..128)
 ]
 
+pairing-public-context = [
+  "cbcl-pairing-public-context/v1",
+  1,
+  "CPACE25519-SHA512-D21",
+  application-id,
+  relay-origin,
+  mailbox-id,
+  bstr .size 32 / null,
+  bstr .size 32 / null
+]
+
 cpace-frame = {
   "v": 1,
   "kind": "cpace",

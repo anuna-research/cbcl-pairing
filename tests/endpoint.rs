@@ -8,6 +8,7 @@ use cbcl_pairing::{
         SessionPerformative,
     },
     channel::PendingChannel,
+    context::PairingContext,
     cpace,
     endpoint::{
         BindOutcome, EndpointEffect, EndpointReducer, InvitationRecord, InvitationStatus,
@@ -18,16 +19,15 @@ use cbcl_pairing::{
         SyntheticProfile, SYNTHETIC_ACTION, SYNTHETIC_APPLICATION, SYNTHETIC_PAYLOAD,
     },
     wire::{
-        decode_pairing_intent, decode_sealed_plaintext, encode_channel_frame, encode_cpace_message,
-        encode_invitation, encode_pairing_decision, encode_sealed_plaintext, ApplicationPayload,
-        ChannelFrame, Decision, Invitation, Locator, PairingDecision, PairingIntent,
-        SealedPlaintext, Side,
+        decode_invitation, decode_pairing_intent, decode_sealed_plaintext, encode_channel_frame,
+        encode_cpace_message, encode_invitation, encode_pairing_decision, encode_sealed_plaintext,
+        ApplicationPayload, ChannelFrame, Decision, Invitation, Locator, PairingDecision,
+        PairingIntent, SealedPlaintext, Side,
     },
 };
 use sha2::{Digest, Sha256};
 
 const MAILBOX_ID: [u8; 32] = [0x55; 32];
-const PUBLIC_CONTEXT: &[u8] = b"deterministic SPEC-072 public context";
 
 struct Materials {
     invitation: Vec<u8>,
@@ -47,41 +47,33 @@ struct Materials {
     claimant_frame_bytes: Vec<u8>,
 }
 
-fn invitation_bytes() -> Vec<u8> {
-    encode_invitation(&Invitation {
+fn invitation() -> Invitation {
+    Invitation {
         application: "example.test/synthetic/v1".into(),
         relay_origin: "https://relay.example.test".into(),
         locator: Locator::Direct(MAILBOX_ID),
         secret: vec![0x31; 16],
         expected_allocator_key: None,
         expected_claimant_key: None,
-    })
-    .expect("invitation")
+    }
+}
+
+fn invitation_bytes() -> Vec<u8> {
+    encode_invitation(&invitation()).expect("invitation")
 }
 
 fn materials() -> Materials {
-    let invitation = invitation_bytes();
+    let invitation_value = invitation();
+    let invitation = encode_invitation(&invitation_value).expect("invitation");
     let allocator_key = CeremonySigningKey::from_secret([0x11; 32]).expect("allocator key");
     let claimant_key = CeremonySigningKey::from_secret([0x22; 32]).expect("claimant key");
     let ceremony = cbcl_pairing::cbcl_protocol::ceremony_id(&invitation);
-    let (allocator_state, allocator_message) = cpace::start(
-        Side::Allocator,
-        &[0x31; 16],
-        PUBLIC_CONTEXT,
-        &MAILBOX_ID,
-        b"allocator-ad",
-        [0x41; 32],
-    )
-    .expect("allocator CPace");
-    let (claimant_state, claimant_message) = cpace::start(
-        Side::Claimant,
-        &[0x31; 16],
-        PUBLIC_CONTEXT,
-        &MAILBOX_ID,
-        b"claimant-ad",
-        [0x42; 32],
-    )
-    .expect("claimant CPace");
+    let (allocator_state, allocator_message) =
+        cpace::start_pairing(Side::Allocator, &invitation_value, MAILBOX_ID, [0x41; 32])
+            .expect("allocator CPace");
+    let (claimant_state, claimant_message) =
+        cpace::start_pairing(Side::Claimant, &invitation_value, MAILBOX_ID, [0x42; 32])
+            .expect("claimant CPace");
     let allocator_isk = cpace::finish(allocator_state, &claimant_message).expect("allocator ISK");
     let claimant_isk = cpace::finish(claimant_state, &allocator_message).expect("claimant ISK");
 
@@ -151,18 +143,20 @@ fn materials() -> Materials {
         )
         .expect("claimant local");
 
-    let allocator_pending = PendingChannel::new(
+    let allocator_pending = PendingChannel::new_pairing(
         Side::Allocator,
         allocator_isk,
-        PUBLIC_CONTEXT,
+        &invitation_value,
+        MAILBOX_ID,
         &allocator_frame_bytes,
         &claimant_frame_bytes,
     )
     .expect("allocator pending");
-    let claimant_pending = PendingChannel::new(
+    let claimant_pending = PendingChannel::new_pairing(
         Side::Claimant,
         claimant_isk,
-        PUBLIC_CONTEXT,
+        &invitation_value,
+        MAILBOX_ID,
         &allocator_frame_bytes,
         &claimant_frame_bytes,
     )
@@ -188,10 +182,12 @@ fn materials() -> Materials {
 }
 
 fn bound_record(invitation: &[u8], peer_frame: &[u8]) -> InvitationRecord {
+    let invitation_value = decode_invitation(invitation).expect("invitation");
+    let context = PairingContext::derive(&invitation_value, MAILBOX_ID).expect("context");
     let mut record = InvitationRecord::new(invitation);
     assert_eq!(
         record
-            .bind(MAILBOX_ID, peer_frame, PUBLIC_CONTEXT)
+            .bind(MAILBOX_ID, peer_frame, context.channel_context())
             .expect("bind"),
         BindOutcome::Bound
     );
@@ -317,20 +313,20 @@ fn invitation_is_bound_before_the_first_guess_and_only_exact_resume_survives() {
     assert_eq!(record.status(), InvitationStatus::Unused);
     assert_eq!(
         record
-            .bind(MAILBOX_ID, b"peer-frame", PUBLIC_CONTEXT)
+            .bind(MAILBOX_ID, b"peer-frame", b"public-context")
             .expect("first bind"),
         BindOutcome::Bound
     );
     assert_eq!(record.status(), InvitationStatus::Bound);
     assert_eq!(
         record
-            .bind(MAILBOX_ID, b"peer-frame", PUBLIC_CONTEXT)
+            .bind(MAILBOX_ID, b"peer-frame", b"public-context")
             .expect("exact resume"),
         BindOutcome::Resumed
     );
     assert_eq!(
         record
-            .bind(MAILBOX_ID, b"alternate-peer-frame", PUBLIC_CONTEXT)
+            .bind(MAILBOX_ID, b"alternate-peer-frame", b"public-context")
             .unwrap_err(),
         ReducerError::Invitation
     );

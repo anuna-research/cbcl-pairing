@@ -70,8 +70,10 @@ corresponding bootstrap control, and send its `ChannelFrame::Cpace` through the
 mailbox.
 
 After both CPace controls are valid, `cpace::finish` produces the shared
-intermediate key. Create `PendingChannel` from that key and the two exact CPace
-frames. The endpoint reducer emits/accepts the role-bound Finished frames.
+intermediate key. Create `PendingChannel` with `PendingChannel::new_pairing`,
+that key, the invitation, resolved mailbox, and the two exact CPace frames. The
+constructor owns the deterministic public-context encoding. The endpoint
+reducer emits/accepts the role-bound Finished frames.
 
 No intent, approval UI, payload, or grant is legal until both Finished values
 verify and the R6 session cast opens. A CBCL `Unknown` verdict is retained for

@@ -6,12 +6,14 @@ use std::fmt;
 
 const CI_DOMAIN: &str = "cbcl-pairing-ci/v1";
 const AD_DOMAIN: &str = "cbcl-pairing-ad/v1";
+const CHANNEL_CONTEXT_DOMAIN: &str = "cbcl-pairing-public-context/v1";
 
 /// Exact deterministic CPace inputs derived from one invitation and resolved
 /// mailbox identifier.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PairingContext {
     channel_identifier: Vec<u8>,
+    channel_context: Vec<u8>,
     session_id: [u8; 32],
     associated_data: [Vec<u8>; 2],
 }
@@ -39,8 +41,23 @@ impl PairingContext {
             associated_data(Side::Allocator, invitation.expected_allocator_key.as_ref())?,
             associated_data(Side::Claimant, invitation.expected_claimant_key.as_ref())?,
         ];
+        let channel_context = canonical(&Value::Array(vec![
+            Value::Text(CHANNEL_CONTEXT_DOMAIN.into()),
+            Value::Integer(1.into()),
+            Value::Text(SUITE_ID.into()),
+            Value::Text(invitation.application.clone()),
+            Value::Text(invitation.relay_origin.clone()),
+            Value::Bytes(mailbox_id.to_vec()),
+            invitation
+                .expected_allocator_key
+                .map_or(Value::Null, |key| Value::Bytes(key.to_vec())),
+            invitation
+                .expected_claimant_key
+                .map_or(Value::Null, |key| Value::Bytes(key.to_vec())),
+        ]))?;
         Ok(Self {
             channel_identifier,
+            channel_context,
             session_id: mailbox_id,
             associated_data,
         })
@@ -50,6 +67,12 @@ impl PairingContext {
     #[must_use]
     pub fn channel_identifier(&self) -> &[u8] {
         &self.channel_identifier
+    }
+
+    /// Borrow the exact deterministic secure-channel public context.
+    #[must_use]
+    pub fn channel_context(&self) -> &[u8] {
+        &self.channel_context
     }
 
     /// Borrow the exact 32-octet CPace session identifier.

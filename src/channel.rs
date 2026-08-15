@@ -1,8 +1,9 @@
 //! SPEC-072 transcript, key-confirmation, and directional AEAD channel.
 
 use crate::{
+    context::PairingContext,
     cpace::IntermediateSessionKey,
-    wire::{ChannelFrame, Direction, Side},
+    wire::{ChannelFrame, Direction, Invitation, Side},
 };
 use aes_gcm::{
     aead::{Aead, Payload},
@@ -44,6 +45,9 @@ pub enum ChannelError {
     KeySchedule,
     /// Local authenticated encryption failed after validation.
     Encryption,
+    /// The invitation and resolved mailbox could not form the normative
+    /// SPEC-072 public context.
+    InvalidContext,
 }
 
 impl fmt::Display for ChannelError {
@@ -78,6 +82,27 @@ impl fmt::Debug for PendingChannel {
 }
 
 impl PendingChannel {
+    /// Derive the normative SPEC-072 channel schedule without allowing the
+    /// application to invent a public-context encoding.
+    pub fn new_pairing(
+        local_side: Side,
+        isk: IntermediateSessionKey,
+        invitation: &Invitation,
+        mailbox_id: [u8; 32],
+        allocator_cpace_frame: &[u8],
+        claimant_cpace_frame: &[u8],
+    ) -> Result<Self, ChannelError> {
+        let context = PairingContext::derive(invitation, mailbox_id)
+            .map_err(|_| ChannelError::InvalidContext)?;
+        Self::new(
+            local_side,
+            isk,
+            context.channel_context(),
+            allocator_cpace_frame,
+            claimant_cpace_frame,
+        )
+    }
+
     /// Derive the complete role-bound channel schedule from CPace ISK and the
     /// three exact transcript encodings.
     pub fn new(
