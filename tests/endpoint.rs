@@ -21,8 +21,8 @@ use cbcl_pairing::{
     wire::{
         decode_invitation, decode_pairing_intent, decode_sealed_plaintext, encode_channel_frame,
         encode_cpace_message, encode_invitation, encode_pairing_decision, encode_sealed_plaintext,
-        ApplicationPayload, ChannelFrame, Decision, Invitation, Locator, PairingDecision,
-        PairingIntent, SealedPlaintext, Side,
+        ApplicationPayload, ChannelFrame, CloseReason, Decision, Invitation, Locator,
+        PairingDecision, PairingIntent, SealedPlaintext, Side,
     },
 };
 use sha2::{Digest, Sha256};
@@ -334,6 +334,43 @@ fn invitation_is_bound_before_the_first_guess_and_only_exact_resume_survives() {
 }
 
 #[test]
+fn invitation_record_roundtrips_durably_and_rejects_noncanonical_state() {
+    let invitation = invitation_bytes();
+    let mut record = InvitationRecord::new(&invitation);
+    let unused = record.encode().expect("encode unused");
+    assert_eq!(InvitationRecord::decode(&unused), Ok(record.clone()));
+
+    record
+        .bind(MAILBOX_ID, b"peer-frame", b"public-context")
+        .expect("bind before processing");
+    let bound = record.encode().expect("encode bound");
+    let mut resumed = InvitationRecord::decode(&bound).expect("restart record");
+    assert_eq!(
+        resumed.bind(MAILBOX_ID, b"peer-frame", b"public-context"),
+        Ok(BindOutcome::Resumed)
+    );
+
+    let mut trailing = bound.clone();
+    trailing.push(0);
+    assert_eq!(
+        InvitationRecord::decode(&trailing),
+        Err(ReducerError::Recognition)
+    );
+    let mut alternate = InvitationRecord::decode(&bound).expect("restart bound");
+    assert_eq!(
+        alternate.bind(MAILBOX_ID, b"alternate-peer", b"public-context"),
+        Err(ReducerError::Invitation)
+    );
+    let spent = alternate.encode().expect("encode spent");
+    assert_eq!(
+        InvitationRecord::decode(&spent)
+            .expect("decode spent")
+            .status(),
+        InvitationStatus::Spent
+    );
+}
+
+#[test]
 fn test_021_unknown_finished_has_no_crypto_or_role_cast_effect() {
     let m = materials();
     let mut incomplete = BootstrapMonitor::new(&m.invitation).expect("monitor");
@@ -584,6 +621,216 @@ fn peer_signed_but_wrong_finished_is_terminal_and_erases_keys() {
     assert!(!allocator.session_ready());
     assert_eq!(allocator.delivered_payloads(), 0);
     assert_eq!(allocator.invitation_status(), InvitationStatus::Spent);
+}
+
+#[test]
+fn test_011_cpace_replay_fork_and_omission_cannot_activate_an_endpoint() {
+    let m = materials();
+    let context = PairingContext::derive(&invitation(), MAILBOX_ID).expect("context");
+
+    let mut replay = InvitationRecord::new(&m.invitation);
+    assert_eq!(
+        replay.bind(
+            MAILBOX_ID,
+            &m.claimant_frame_bytes,
+            context.channel_context()
+        ),
+        Ok(BindOutcome::Bound)
+    );
+    assert_eq!(
+        replay.bind(
+            MAILBOX_ID,
+            &m.claimant_frame_bytes,
+            context.channel_context()
+        ),
+        Ok(BindOutcome::Resumed),
+        "an exact CPace replay is only a crash resume and creates no endpoint effect"
+    );
+    assert_eq!(replay.status(), InvitationStatus::Bound);
+
+    let mut fork = replay.clone();
+    assert_eq!(
+        fork.bind(
+            MAILBOX_ID,
+            b"forked peer CPace frame",
+            context.channel_context()
+        ),
+        Err(ReducerError::Invitation)
+    );
+    assert_eq!(fork.status(), InvitationStatus::Spent);
+
+    let mut omitted = InvitationRecord::new(&m.invitation);
+    omitted.consume();
+    assert_eq!(omitted.status(), InvitationStatus::Spent);
+    assert_eq!(
+        omitted.bind(
+            MAILBOX_ID,
+            &m.claimant_frame_bytes,
+            context.channel_context()
+        ),
+        Err(ReducerError::Invitation)
+    );
+
+    // The two role-root CPace controls may arrive in either order. CBCL makes
+    // that reordering deterministic by role; it does not create a channel.
+    let mut reordered = BootstrapMonitor::new(&m.invitation).expect("monitor");
+    assert_eq!(
+        reordered
+            .admit(
+                BootstrapPerformative::CpaceB,
+                &m.claimant_control,
+                &m.claimant_body
+            )
+            .expect("claimant root")
+            .verdict(),
+        ProtocolVerdict::Valid
+    );
+    assert_eq!(
+        reordered
+            .admit(
+                BootstrapPerformative::CpaceA,
+                &m.allocator_control,
+                &m.allocator_body
+            )
+            .expect("allocator root")
+            .verdict(),
+        ProtocolVerdict::Valid
+    );
+    assert_eq!(reordered.stored_count(), 2);
+
+    // A transport replay that escapes the pre-reducer exact-resume gate is a
+    // phase violation, not a second online guess.
+    let (mut allocator, _) = reducer_pair();
+    let replayed_frame = ChannelFrame::Cpace {
+        side: Side::Claimant,
+        control: m.claimant_control,
+        message: m.claimant_body,
+    };
+    assert_eq!(
+        allocator.receive_frame(&replayed_frame),
+        Err(ReducerError::Phase)
+    );
+    assert_eq!(
+        allocator.terminal_reason(),
+        Some(TerminalReason::ProtocolViolation)
+    );
+    assert!(allocator.secrets_erased());
+    assert!(!allocator.session_ready());
+    assert_eq!(allocator.delivered_payloads(), 0);
+}
+
+#[test]
+fn test_011_finished_replay_reorder_and_omission_are_terminal_before_acceptance() {
+    // Reordering a peer Finished before the local Finished is a terminal phase
+    // violation, even though the peer control is otherwise valid.
+    let (mut allocator, mut claimant) = reducer_pair();
+    let claimant_finished = claimant
+        .local_finished_frame()
+        .expect("claimant Finished")
+        .expect("valid claimant Finished");
+    assert_eq!(
+        allocator.receive_frame(&claimant_finished),
+        Err(ReducerError::Phase)
+    );
+    assert_eq!(
+        allocator.terminal_reason(),
+        Some(TerminalReason::ProtocolViolation)
+    );
+    assert!(allocator.secrets_erased());
+    assert!(!allocator.session_ready());
+    assert_eq!(allocator.delivered_payloads(), 0);
+
+    // A valid Finished can activate the channel once. An exact replay must
+    // burn that endpoint rather than leak through as a non-terminal phase error.
+    let (mut allocator, mut claimant) = reducer_pair();
+    let allocator_finished = allocator
+        .local_finished_frame()
+        .expect("allocator Finished")
+        .expect("valid allocator Finished");
+    claimant
+        .local_finished_frame()
+        .expect("claimant Finished")
+        .expect("valid claimant Finished");
+    assert!(claimant
+        .receive_frame(&allocator_finished)
+        .expect("first Finished")
+        .is_empty());
+    assert_eq!(
+        claimant.receive_frame(&allocator_finished),
+        Err(ReducerError::Phase)
+    );
+    assert_eq!(
+        claimant.terminal_reason(),
+        Some(TerminalReason::ProtocolViolation)
+    );
+    assert!(claimant.secrets_erased());
+    assert!(!claimant.session_ready());
+    assert_eq!(claimant.delivered_payloads(), 0);
+
+    // Omission is resolved by the relay's original-expiry event, an explicit
+    // time input to the pure reducer.
+    let (mut allocator, _) = reducer_pair();
+    allocator
+        .local_finished_frame()
+        .expect("local Finished")
+        .expect("valid local Finished");
+    assert_eq!(
+        allocator.relay_closed(CloseReason::Expired),
+        Ok(vec![EndpointEffect::CloseMailbox])
+    );
+    assert_eq!(allocator.terminal_reason(), Some(TerminalReason::Expired));
+    assert!(allocator.secrets_erased());
+    assert!(!allocator.session_ready());
+    assert_eq!(allocator.delivered_payloads(), 0);
+}
+
+#[test]
+fn test_011_sealed_replay_fork_and_omission_cannot_release_a_grant() {
+    let (mut allocator, mut claimant) = confirmed_pair();
+    let intent_frame = allocator.send_intent(&intent()).expect("intent");
+    assert!(matches!(
+        claimant.receive_frame(&intent_frame).as_deref(),
+        Ok([EndpointEffect::DisplayIntent(_)])
+    ));
+    assert_eq!(claimant.delivered_payloads(), 0);
+    assert_eq!(
+        claimant.receive_frame(&intent_frame),
+        Err(ReducerError::Channel)
+    );
+    assert_eq!(claimant.terminal_reason(), Some(TerminalReason::Channel));
+    assert!(claimant.secrets_erased());
+    assert_eq!(claimant.delivered_payloads(), 0);
+
+    let (mut allocator, mut claimant) = confirmed_pair();
+    let mut fork = allocator.send_intent(&intent()).expect("intent");
+    let ChannelFrame::Sealed { ciphertext, .. } = &mut fork else {
+        panic!("sealed intent")
+    };
+    ciphertext[0] ^= 1;
+    assert_eq!(claimant.receive_frame(&fork), Err(ReducerError::Channel));
+    assert_eq!(claimant.terminal_reason(), Some(TerminalReason::Channel));
+    assert!(claimant.secrets_erased());
+    assert_eq!(claimant.intent_digest(), None);
+    assert_eq!(claimant.delivered_payloads(), 0);
+
+    let (_, mut claimant) = confirmed_pair();
+    assert_eq!(
+        claimant.relay_closed(CloseReason::Expired),
+        Ok(vec![EndpointEffect::CloseMailbox])
+    );
+    assert_eq!(claimant.terminal_reason(), Some(TerminalReason::Expired));
+    assert!(claimant.secrets_erased());
+    assert_eq!(claimant.delivered_payloads(), 0);
+}
+
+#[test]
+fn explicit_cancellation_consumes_the_invitation_and_erases_secrets() {
+    let (mut endpoint, _) = reducer_pair();
+    assert_eq!(endpoint.cancel(), Ok(vec![EndpointEffect::CloseMailbox]));
+    assert_eq!(endpoint.terminal_reason(), Some(TerminalReason::Cancelled));
+    assert_eq!(endpoint.invitation_status(), InvitationStatus::Spent);
+    assert!(endpoint.secrets_erased());
+    assert_eq!(endpoint.cancel(), Err(ReducerError::Terminal));
 }
 
 #[test]

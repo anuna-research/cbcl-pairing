@@ -13,6 +13,7 @@ use crate::{
     observability::{
         CapacityCaps, RelayGauges, RelayLogEvent, RelayMetrics, RelayObservability, RelayOutcome,
     },
+    storage::{MailboxStore, MemoryMailboxStore, StoreError},
     wire::{ClientMessage, CloseReason, Locator, ServerMessage},
 };
 use sha2::{Digest, Sha256};
@@ -63,6 +64,8 @@ pub enum RelayError {
     InvalidConfiguration,
     /// Time or limiter state failed.
     Limiter,
+    /// Mailbox persistence failed closed.
+    Storage,
 }
 
 impl fmt::Display for RelayError {
@@ -76,6 +79,12 @@ impl std::error::Error for RelayError {}
 impl From<LimiterError> for RelayError {
     fn from(_: LimiterError) -> Self {
         Self::Limiter
+    }
+}
+
+impl From<StoreError> for RelayError {
+    fn from(_: StoreError) -> Self {
+        Self::Storage
     }
 }
 
@@ -96,6 +105,7 @@ pub struct RelayService {
     config: RelayConfig,
     limiter: Limiter,
     observability: RelayObservability,
+    store: Box<dyn MailboxStore>,
     mailboxes: BTreeMap<[u8; 32], Mailbox>,
     nameplates: BTreeMap<u32, [u8; 32]>,
     connections: BTreeMap<ConnectionId, ConnectionState>,
@@ -119,6 +129,14 @@ impl fmt::Debug for RelayService {
 impl RelayService {
     /// Construct a bounded service.
     pub fn new(config: RelayConfig) -> Result<Self, RelayError> {
+        Self::with_store(config, Box::<MemoryMailboxStore>::default())
+    }
+
+    /// Construct a service over an injected persistent mailbox store.
+    pub fn with_store(
+        config: RelayConfig,
+        mut store: Box<dyn MailboxStore>,
+    ) -> Result<Self, RelayError> {
         if config.capacity.open_mailboxes == 0
             || config.capacity.queue_bytes == 0
             || config.capacity.limiter_entries == 0
@@ -128,17 +146,39 @@ impl RelayService {
         }
         let limiter = Limiter::new(config.operator_key, config.limiter.clone())?;
         let observability = RelayObservability::new(config.capacity);
+        let mut mailboxes = BTreeMap::new();
+        let mut nameplates = BTreeMap::new();
+        for mailbox in store.load()? {
+            let snapshot = mailbox.snapshot();
+            if mailboxes.insert(snapshot.mailbox_id, mailbox).is_some() {
+                return Err(RelayError::Storage);
+            }
+            if let Some(nameplate) = snapshot.nameplate {
+                if nameplates.insert(nameplate, snapshot.mailbox_id).is_some() {
+                    return Err(RelayError::Storage);
+                }
+            }
+        }
+        if mailboxes.len() as u64 > config.capacity.open_mailboxes
+            || queue_bytes(&mailboxes) > config.capacity.queue_bytes
+        {
+            return Err(RelayError::InvalidConfiguration);
+        }
         let mut service = Self {
             config,
             limiter,
             observability,
-            mailboxes: BTreeMap::new(),
-            nameplates: BTreeMap::new(),
+            store,
+            mailboxes,
+            nameplates,
             connections: BTreeMap::new(),
             routes: BTreeMap::new(),
             last_log: None,
         };
         service.refresh_gauges();
+        if service.has_duplicate_membership_hashes() {
+            return Err(RelayError::Storage);
+        }
         Ok(service)
     }
 
@@ -185,22 +225,22 @@ impl RelayService {
                 ClientMessage::Allocate {
                     locator_mode,
                     ttl_seconds,
-                } => self.allocate(connection, now, randomness, locator_mode, ttl_seconds),
+                } => self.allocate(connection, now, randomness, locator_mode, ttl_seconds)?,
                 ClientMessage::Claim(locator) => {
-                    self.claim(connection, now, randomness.membership_token, &locator)
+                    self.claim(connection, now, randomness.membership_token, &locator)?
                 }
                 ClientMessage::Open {
                     mailbox_id,
                     membership_token,
-                } => self.open(connection, now, mailbox_id, membership_token),
+                } => self.open(connection, now, mailbox_id, membership_token)?,
                 ClientMessage::Put { seq, body } => {
-                    self.member_command(connection, now, MailboxCommandKind::Put { seq, body })
+                    self.member_command(connection, now, MailboxCommandKind::Put { seq, body })?
                 }
                 ClientMessage::Ack { peer_seq } => {
-                    self.member_command(connection, now, MailboxCommandKind::Ack { peer_seq })
+                    self.member_command(connection, now, MailboxCommandKind::Ack { peer_seq })?
                 }
                 ClientMessage::Close => {
-                    self.member_command(connection, now, MailboxCommandKind::Close)
+                    self.member_command(connection, now, MailboxCommandKind::Close)?
                 }
                 ClientMessage::Ping => vec![route(connection, ServerMessage::Pong)],
             }
@@ -232,7 +272,7 @@ impl RelayService {
             let transition = reap(&state, now).map_err(|_| RelayError::InvalidConfiguration)?;
             if transition.state.is_none() {
                 messages.extend(self.terminal_routes(mailbox_id, CloseReason::Expired));
-                self.remove_mailbox(mailbox_id, &state);
+                self.remove_mailbox(mailbox_id, &state)?;
             }
         }
         self.refresh_gauges();
@@ -257,6 +297,39 @@ impl RelayService {
         self.mailboxes.len()
     }
 
+    /// Disable all future allocations immediately. Existing mailboxes retain
+    /// their original expiry and continue to support delivery and closure.
+    pub fn disable_allocation(&mut self) {
+        self.config.allocation_enabled = false;
+    }
+
+    /// Close every live mailbox as an operator rollback action.
+    pub fn emergency_close(&mut self, now: u64) -> Result<Vec<RoutedMessage>, RelayError> {
+        self.disable_allocation();
+        let ids: Vec<_> = self.mailboxes.keys().copied().collect();
+        let mut messages = Vec::new();
+        for mailbox_id in ids {
+            let Some(state) = self.mailboxes.get(&mailbox_id).cloned() else {
+                continue;
+            };
+            if matches!(state.status(), crate::mailbox::MailboxStatus::Terminal(_)) {
+                continue;
+            }
+            let transition = transition(
+                &state,
+                now,
+                MailboxCommand::Close {
+                    sender: Membership::Allocator,
+                },
+            )
+            .map_err(|_| RelayError::InvalidConfiguration)?;
+            messages.extend(self.terminal_routes(mailbox_id, CloseReason::Closed));
+            self.commit(mailbox_id, transition)?;
+        }
+        self.refresh_gauges();
+        Ok(deduplicate_routes(messages))
+    }
+
     fn allocate(
         &mut self,
         connection: ConnectionId,
@@ -264,9 +337,9 @@ impl RelayService {
         randomness: RelayRandomness,
         locator_mode: u8,
         ttl_seconds: Option<u16>,
-    ) -> Vec<RoutedMessage> {
+    ) -> Result<Vec<RoutedMessage>, RelayError> {
         if !self.config.allocation_enabled {
-            return vec![route(connection, ServerMessage::Error(503))];
+            return Ok(vec![route(connection, ServerMessage::Error(503))]);
         }
         if self
             .connections
@@ -274,13 +347,13 @@ impl RelayService {
             .and_then(|state| state.membership)
             .is_some()
         {
-            return vec![route(connection, ServerMessage::Error(409))];
+            return Ok(vec![route(connection, ServerMessage::Error(409))]);
         }
         if self.mailboxes.len() as u64 >= self.config.capacity.open_mailboxes
             || self.mailboxes.contains_key(&randomness.mailbox_id)
             || self.token_hash_exists(token_hash(&randomness.membership_token))
         {
-            return vec![route(connection, ServerMessage::Error(503))];
+            return Ok(vec![route(connection, ServerMessage::Error(503))]);
         }
         let nameplate = match locator_mode {
             0 => None,
@@ -289,8 +362,8 @@ impl RelayService {
             {
                 Some(randomness.nameplate)
             }
-            1 => return vec![route(connection, ServerMessage::Error(503))],
-            _ => return vec![route(connection, ServerMessage::Error(400))],
+            1 => return Ok(vec![route(connection, ServerMessage::Error(503))]),
+            _ => return Ok(vec![route(connection, ServerMessage::Error(400))]),
         };
         let mailbox = match Mailbox::allocate(AllocationInput {
             mailbox_id: randomness.mailbox_id,
@@ -300,9 +373,10 @@ impl RelayService {
             ttl_seconds,
         }) {
             Ok(value) => value,
-            Err(error) => return vec![route(connection, mailbox_error(&error))],
+            Err(error) => return Ok(vec![route(connection, mailbox_error(&error))]),
         };
         let expires_at = mailbox.expires_at();
+        self.store.put(&mailbox)?;
         self.mailboxes.insert(randomness.mailbox_id, mailbox);
         if let Some(nameplate) = nameplate {
             self.nameplates.insert(nameplate, randomness.mailbox_id);
@@ -314,7 +388,7 @@ impl RelayService {
                 membership: Membership::Allocator,
             },
         );
-        vec![route(
+        Ok(vec![route(
             connection,
             ServerMessage::Allocated {
                 mailbox_id: randomness.mailbox_id,
@@ -322,7 +396,7 @@ impl RelayService {
                 nameplate,
                 expires_at,
             },
-        )]
+        )])
     }
 
     fn claim(
@@ -331,28 +405,28 @@ impl RelayService {
         now: u64,
         membership_token: [u8; 32],
         locator: &Locator,
-    ) -> Vec<RoutedMessage> {
+    ) -> Result<Vec<RoutedMessage>, RelayError> {
         if self
             .connections
             .get(&connection)
             .and_then(|state| state.membership)
             .is_some()
         {
-            return vec![route(connection, ServerMessage::Error(409))];
+            return Ok(vec![route(connection, ServerMessage::Error(409))]);
         }
         let Some(mailbox_id) = self.resolve(locator) else {
-            return vec![route(connection, ServerMessage::Error(404))];
+            return Ok(vec![route(connection, ServerMessage::Error(404))]);
         };
         let claimant_hash = token_hash(&membership_token);
         if self.token_hash_exists(claimant_hash) {
-            return vec![route(connection, ServerMessage::Error(409))];
+            return Ok(vec![route(connection, ServerMessage::Error(409))]);
         }
         let Some(state) = self.mailboxes.get(&mailbox_id).cloned() else {
-            return vec![route(connection, ServerMessage::Error(404))];
+            return Ok(vec![route(connection, ServerMessage::Error(404))]);
         };
         let transition = match transition(&state, now, MailboxCommand::Claim { claimant_hash }) {
             Ok(value) => value,
-            Err(error) => return vec![route(connection, mailbox_error(&error))],
+            Err(error) => return Ok(vec![route(connection, mailbox_error(&error))]),
         };
         let claimed = transition.effects.iter().find_map(|effect| match effect {
             MailboxEffect::Claimed { expires_at, .. } => Some(*expires_at),
@@ -362,7 +436,7 @@ impl RelayService {
             MailboxEffect::Terminal(reason) => Some(*reason),
             _ => None,
         });
-        self.commit(mailbox_id, transition);
+        self.commit(mailbox_id, transition)?;
         if let Some(expires_at) = claimed {
             self.attach(
                 connection,
@@ -371,20 +445,20 @@ impl RelayService {
                     membership: Membership::Claimant,
                 },
             );
-            vec![route(
+            Ok(vec![route(
                 connection,
                 ServerMessage::Claimed {
                     mailbox_id,
                     membership_token,
                     expires_at,
                 },
-            )]
+            )])
         } else if let Some(reason) = terminal {
             let mut messages = self.terminal_routes(mailbox_id, reason);
             messages.push(route(connection, ServerMessage::Closed(reason)));
-            deduplicate_routes(messages)
+            Ok(deduplicate_routes(messages))
         } else {
-            vec![route(connection, ServerMessage::Error(503))]
+            Ok(vec![route(connection, ServerMessage::Error(503))])
         }
     }
 
@@ -394,9 +468,9 @@ impl RelayService {
         now: u64,
         mailbox_id: [u8; 32],
         membership_token: [u8; 32],
-    ) -> Vec<RoutedMessage> {
+    ) -> Result<Vec<RoutedMessage>, RelayError> {
         let Some(state) = self.mailboxes.get(&mailbox_id).cloned() else {
-            return vec![route(connection, ServerMessage::Error(404))];
+            return Ok(vec![route(connection, ServerMessage::Error(404))]);
         };
         let transition = match transition(
             &state,
@@ -406,7 +480,7 @@ impl RelayService {
             },
         ) {
             Ok(value) => value,
-            Err(error) => return vec![route(connection, mailbox_error(&error))],
+            Err(error) => return Ok(vec![route(connection, mailbox_error(&error))]),
         };
         let membership = transition.effects.iter().find_map(|effect| match effect {
             MailboxEffect::Opened { membership, .. } => Some(*membership),
@@ -430,7 +504,7 @@ impl RelayService {
                 _ => None,
             })
             .collect();
-        self.commit(mailbox_id, transition);
+        self.commit(mailbox_id, transition)?;
         if let Some(membership) = membership {
             self.attach(
                 connection,
@@ -439,13 +513,13 @@ impl RelayService {
                     membership,
                 },
             );
-            deliveries
+            Ok(deliveries)
         } else if let Some(reason) = terminal {
             let mut messages = self.terminal_routes(mailbox_id, reason);
             messages.push(route(connection, ServerMessage::Closed(reason)));
-            deduplicate_routes(messages)
+            Ok(deduplicate_routes(messages))
         } else {
-            vec![route(connection, ServerMessage::Error(503))]
+            Ok(vec![route(connection, ServerMessage::Error(503))])
         }
     }
 
@@ -454,16 +528,16 @@ impl RelayService {
         connection: ConnectionId,
         now: u64,
         command: MailboxCommandKind,
-    ) -> Vec<RoutedMessage> {
+    ) -> Result<Vec<RoutedMessage>, RelayError> {
         let Some(session) = self
             .connections
             .get(&connection)
             .and_then(|state| state.membership)
         else {
-            return vec![route(connection, ServerMessage::Error(404))];
+            return Ok(vec![route(connection, ServerMessage::Error(404))]);
         };
         let Some(state) = self.mailboxes.get(&session.mailbox_id).cloned() else {
-            return vec![route(connection, ServerMessage::Error(404))];
+            return Ok(vec![route(connection, ServerMessage::Error(404))]);
         };
         let mailbox_command = match &command {
             MailboxCommandKind::Put { seq, body } => MailboxCommand::Put {
@@ -481,12 +555,12 @@ impl RelayService {
         };
         let transition = match transition(&state, now, mailbox_command) {
             Ok(value) => value,
-            Err(error) => return vec![route(connection, mailbox_error(&error))],
+            Err(error) => return Ok(vec![route(connection, mailbox_error(&error))]),
         };
         if projected_queue_bytes(&self.mailboxes, session.mailbox_id, &transition)
             > self.config.capacity.queue_bytes
         {
-            return vec![route(connection, ServerMessage::Error(503))];
+            return Ok(vec![route(connection, ServerMessage::Error(503))]);
         }
         let mut messages = Vec::new();
         match &command {
@@ -532,8 +606,8 @@ impl RelayService {
                 _ => {}
             }
         }
-        self.commit(session.mailbox_id, transition);
-        deduplicate_routes(messages)
+        self.commit(session.mailbox_id, transition)?;
+        Ok(deduplicate_routes(messages))
     }
 
     fn attach(&mut self, connection: ConnectionId, membership: SessionMembership) {
@@ -576,12 +650,20 @@ impl RelayService {
         })
     }
 
-    fn commit(&mut self, mailbox_id: [u8; 32], transition: MailboxTransition) {
+    fn commit(
+        &mut self,
+        mailbox_id: [u8; 32],
+        transition: MailboxTransition,
+    ) -> Result<(), RelayError> {
         if let Some(state) = transition.state {
+            self.store.put(&state)?;
             self.mailboxes.insert(mailbox_id, state);
-        } else if let Some(previous) = self.mailboxes.remove(&mailbox_id) {
+        } else if let Some(previous) = self.mailboxes.get(&mailbox_id).cloned() {
+            self.store.remove(mailbox_id)?;
+            self.mailboxes.remove(&mailbox_id);
             self.remove_mailbox_indexes(mailbox_id, &previous);
         }
+        Ok(())
     }
 
     fn terminal_routes(&self, mailbox_id: [u8; 32], reason: CloseReason) -> Vec<RoutedMessage> {
@@ -597,9 +679,11 @@ impl RelayService {
             .collect()
     }
 
-    fn remove_mailbox(&mut self, mailbox_id: [u8; 32], state: &Mailbox) {
+    fn remove_mailbox(&mut self, mailbox_id: [u8; 32], state: &Mailbox) -> Result<(), RelayError> {
+        self.store.remove(mailbox_id)?;
         self.mailboxes.remove(&mailbox_id);
         self.remove_mailbox_indexes(mailbox_id, state);
+        Ok(())
     }
 
     fn remove_mailbox_indexes(&mut self, mailbox_id: [u8; 32], state: &Mailbox) {
@@ -616,6 +700,19 @@ impl RelayService {
                 }
             }
         }
+    }
+
+    fn has_duplicate_membership_hashes(&self) -> bool {
+        let mut hashes = Vec::new();
+        for mailbox in self.mailboxes.values() {
+            for hash in mailbox.snapshot().membership_hashes {
+                if hashes.contains(&hash) {
+                    return true;
+                }
+                hashes.push(hash);
+            }
+        }
+        false
     }
 
     fn finish(

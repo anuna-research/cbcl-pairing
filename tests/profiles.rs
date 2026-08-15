@@ -2,11 +2,12 @@
 
 use cbcl_pairing::{
     profile::{
-        encode_agent_word_indices, AgentGrant, AgentIntentClaims, AgentProfile, ApplicationProfile,
-        CredentialGrant, CredentialIntentClaims, CredentialProfile, GrantVerifier, LocatorKind,
-        ProfileError, RecognisedPayload, SyntheticGrant, SyntheticIntentClaims, SyntheticProfile,
-        AGENT_ACTION, AGENT_APPLICATION, AGENT_PAYLOAD, CREDENTIAL_ACTION, CREDENTIAL_APPLICATION,
-        CREDENTIAL_PAYLOAD, SYNTHETIC_ACTION, SYNTHETIC_APPLICATION, SYNTHETIC_PAYLOAD,
+        encode_agent_word_indices, AgentGrant, AgentIntentClaims, AgentProfile, AgentWordPair,
+        ApplicationProfile, CredentialGrant, CredentialIntentClaims, CredentialProfile,
+        GrantVerifier, LocatorKind, ProfileError, RecognisedPayload, SyntheticGrant,
+        SyntheticIntentClaims, SyntheticProfile, AGENT_ACTION, AGENT_APPLICATION, AGENT_PAYLOAD,
+        CREDENTIAL_ACTION, CREDENTIAL_APPLICATION, CREDENTIAL_PAYLOAD, SYNTHETIC_ACTION,
+        SYNTHETIC_APPLICATION, SYNTHETIC_PAYLOAD,
     },
     wire::{ApplicationPayload, Invitation, Locator, PairingIntent},
 };
@@ -20,6 +21,32 @@ use std::sync::{
 struct RecordingVerifier {
     calls: Arc<AtomicUsize>,
     allow: bool,
+}
+
+#[test]
+fn test_006_agent_carrier_derives_two_independent_bip39_words_from_22_csprng_bits() {
+    let zero = AgentWordPair::from_csprng_octets([0, 0, 0]);
+    assert_eq!(zero.indices(), [0, 0]);
+    assert_eq!(zero.words(), ["abandon", "abandon"]);
+    assert_eq!(zero.secret(), [0, 0, 0, 0]);
+
+    let maximum = AgentWordPair::from_csprng_octets([0xff, 0xff, 0xff]);
+    assert_eq!(maximum.indices(), [2047, 2047]);
+    assert_eq!(maximum.words(), ["zoo", "zoo"]);
+    assert_eq!(maximum.secret(), [0x07, 0xff, 0x07, 0xff]);
+
+    let generated = AgentWordPair::from_csprng_octets([0x12, 0x34, 0x56]);
+    let [first, second] = generated.words();
+    assert_eq!(AgentWordPair::recognise(first, second), Ok(generated));
+    assert_eq!(
+        AgentWordPair::recognise("not-a-bip39-word", second),
+        Err(ProfileError::InvalidInvitation)
+    );
+    assert_eq!(
+        AgentWordPair::recognise(&first.to_ascii_uppercase(), second),
+        Err(ProfileError::InvalidInvitation),
+        "carrier recognition performs no case folding"
+    );
 }
 
 impl GrantVerifier for RecordingVerifier {
@@ -157,7 +184,15 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/src/bin/cbcl-pairing-relay.rs"
             ))
             .as_slice(),
-            "f9edfbff5440fc937350ae5b52559017105c6c78c4695764692b424414742d7b",
+            "19daf1d84007e02606070539494e9a75984baaacfe598646906b5468d68b2e1d",
+        ),
+        (
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/bin/cbcl-pairing-relay-ws.rs"
+            ))
+            .as_slice(),
+            "58d113d4811c710c219d939e8f6cdcb1ab9ef72d98f2ee4fb0e80213182736bf",
         ),
         (
             include_bytes!(concat!(
@@ -169,15 +204,35 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/mailbox.rs")).as_slice(),
-            "19541cfaee3b158492ab997d3bbbb058fcf98b06d34b4fc60009a09bb751abe5",
+            "b385a9edb0ec1a34f1930daf94ffec977be78feb61887c31856e22d18c05da07",
+        ),
+        (
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/storage.rs")).as_slice(),
+            "0b9725180d06bdac907bbaeb1fafab06daa1ce45bbc409ada3cefc51a51fa1d5",
+        ),
+        (
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/relay.rs")).as_slice(),
+            "2acefa153b79a983bcacbdc6992fa854d162833e14e7809606d0aeba68d0d972",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/limiter.rs")).as_slice(),
-            "871cba629c34269e81ad37ef0acf8769ec09ca5cbd91efac81b8ef990e130f82",
+            "ace64e6c89d745b305af0c5dca42c5e90ab2643ce0ae0f009d66c41ce68e59ca",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/observability.rs")).as_slice(),
             "5c357c35c3a781b39ed1848fa9c6ab34dd3eb2c282a3114be9d9e7825e4b0ed8",
+        ),
+        (
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).as_slice(),
+            "48b35c9ce45ac1a0f1baf168f428510901f031675f077f862d68a97694e696e5",
+        ),
+        (
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/.forgejo/workflows/ci.yml"
+            ))
+            .as_slice(),
+            "a15cf76fd65db954f43952c6adf7e4f342f2ede027d9c2cad13a39203e39771d",
         ),
     ] {
         assert_eq!(hex::encode(Sha256::digest(bytes)), expected);

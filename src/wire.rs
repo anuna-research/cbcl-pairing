@@ -255,8 +255,6 @@ pub struct ApplicationPayload {
 /// Trust-boundary recognition or deterministic-encoding failure.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecognitionError {
-    /// Behavioural stub used only during the Red Gate.
-    NotImplemented,
     /// Input is not one complete well-formed CBOR value.
     MalformedCbor,
     /// Extra octets follow the recognised value.

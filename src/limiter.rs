@@ -149,8 +149,6 @@ pub struct LimiterSnapshot {
 /// Limiter construction or clock error.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LimiterError {
-    /// Behavioural stub used by the detailed Red Gate.
-    NotImplemented,
     /// A policy limit, window, cap, or sweep interval is zero.
     InvalidConfiguration,
     /// Supplied time moved backwards.

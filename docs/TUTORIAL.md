@@ -36,10 +36,15 @@ The built-in agent profile uses two generated word indices, encoded as exactly
 four bytes:
 
 ```rust
-use cbcl_pairing::profile::encode_agent_word_indices;
+use cbcl_pairing::profile::AgentWordPair;
 
-let carrier = encode_agent_word_indices(17, 1503)?;
-assert_eq!(carrier.len(), 4);
+// `random` is three fresh octets from the application's OS CSPRNG.
+# let random = [0x12, 0x34, 0x56];
+let carrier = AgentWordPair::from_csprng_octets(random);
+let words = carrier.words();
+let prs = carrier.secret();
+assert_eq!(words.len(), 2);
+assert_eq!(prs.len(), 4);
 # Ok::<(), cbcl_pairing::profile::ProfileError>(())
 ```
 
@@ -140,6 +145,8 @@ direct duplex connection. Only the adapter changes.
 - Feed only canonical recognised bytes into the protocol monitors.
 - Execute only emitted `EndpointEffect` values.
 - Treat terminal errors as terminal and burn the invitation.
+- Feed relay closure/expiry to `EndpointReducer::relay_closed`; if this happens
+  before reducer construction, call `InvitationRecord::consume` and persist it.
 - Keep relay, endpoint, and profile logs free of invitations, locators, tokens,
   identities, intent text, transcript digests, and payload bytes.
 - Keep production allocation off until every Tier-1 gate is recorded.

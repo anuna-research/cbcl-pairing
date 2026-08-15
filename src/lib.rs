@@ -16,6 +16,7 @@ pub mod mailbox;
 pub mod observability;
 pub mod profile;
 pub mod relay;
+pub mod storage;
 pub mod wire;
 
 /// Exact normative role-free bootstrap dialect source.
@@ -40,33 +41,3 @@ pub const BOOTSTRAP_DIALECT_HASH: &str =
 /// Published canonical session dialect hash and required role-cast pin.
 pub const SESSION_DIALECT_HASH: &str =
     "sha256:465e218843248ed867dfa385e498169607daf49c031fca7173891578e60fab3c";
-
-/// Temporary observable status used by the behavioural Red Gate.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ComponentStatus {
-    /// The component has no conforming implementation yet.
-    NotImplemented,
-    /// The component satisfies its assigned conformance tests.
-    Implemented,
-}
-
-/// Report the current status of a named implementation component.
-///
-/// Unknown names and all initial components return
-/// [`ComponentStatus::NotImplemented`]. Each implementation task removes its
-/// corresponding Red Gate assertion before it can be accepted.
-#[must_use]
-pub fn component_status(name: &str) -> ComponentStatus {
-    match name {
-        "canonical-recognisers" => ComponentStatus::Implemented,
-        "mailbox-core" => ComponentStatus::Implemented,
-        "limiter-observability" => ComponentStatus::Implemented,
-        "cpace-core" => ComponentStatus::Implemented,
-        "secure-channel" => ComponentStatus::Implemented,
-        "cbcl-protocol" => ComponentStatus::Implemented,
-        "endpoint-reducer" => ComponentStatus::Implemented,
-        "application-profiles" => ComponentStatus::Implemented,
-        "relay-service" => ComponentStatus::Implemented,
-        _ => ComponentStatus::NotImplemented,
-    }
-}

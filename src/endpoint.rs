@@ -24,7 +24,7 @@ use crate::{
 use cbcl_core::message::CausedBy;
 use ciborium::Value;
 use sha2::{Digest, Sha256};
-use std::fmt;
+use std::{fmt, io::Cursor};
 use zeroize::Zeroize;
 
 const MAX_PENDING_CONTROLS: usize = 16;
@@ -102,6 +102,66 @@ impl InvitationRecord {
         self.status
     }
 
+    /// Consume the invitation after local cancellation, relay termination, or
+    /// expiry before an endpoint reducer has been constructed.
+    pub fn consume(&mut self) {
+        self.spend();
+    }
+
+    /// Encode the durable, secret-free record as deterministic CBOR.
+    pub fn encode(&self) -> Result<Vec<u8>, ReducerError> {
+        let status = match self.status {
+            InvitationStatus::Unused => 0_u64,
+            InvitationStatus::Bound => 1,
+            InvitationStatus::Spent => 2,
+        };
+        cbor2::to_canonical_vec(&Value::Array(vec![
+            Value::Integer(1.into()),
+            Value::Bytes(self.invitation_digest.to_vec()),
+            Value::Integer(status.into()),
+            self.binding
+                .map_or(Value::Null, |binding| Value::Bytes(binding.to_vec())),
+        ]))
+        .map_err(|_| ReducerError::Recognition)
+    }
+
+    /// Recognise one exact deterministic durable record after a restart.
+    pub fn decode(input: &[u8]) -> Result<Self, ReducerError> {
+        let value: Value =
+            ciborium::de::from_reader(Cursor::new(input)).map_err(|_| ReducerError::Recognition)?;
+        if cbor2::to_canonical_vec(&value).map_err(|_| ReducerError::Recognition)? != input {
+            return Err(ReducerError::Recognition);
+        }
+        let Value::Array(parts) = value else {
+            return Err(ReducerError::Recognition);
+        };
+        let [version, digest, status, binding] = parts.as_slice() else {
+            return Err(ReducerError::Recognition);
+        };
+        if integer_u64(version) != Some(1) {
+            return Err(ReducerError::Recognition);
+        }
+        let invitation_digest = fixed_value::<32>(digest)?;
+        let status = match integer_u64(status) {
+            Some(0) => InvitationStatus::Unused,
+            Some(1) => InvitationStatus::Bound,
+            Some(2) => InvitationStatus::Spent,
+            _ => return Err(ReducerError::Recognition),
+        };
+        let binding = match binding {
+            Value::Null => None,
+            value => Some(fixed_value::<32>(value)?),
+        };
+        if (status == InvitationStatus::Bound) != binding.is_some() {
+            return Err(ReducerError::Recognition);
+        }
+        Ok(Self {
+            invitation_digest,
+            status,
+            binding,
+        })
+    }
+
     fn spend(&mut self) {
         self.status = InvitationStatus::Spent;
         self.binding = None;
@@ -124,6 +184,16 @@ pub enum EndpointEffect {
 /// Stable terminal classification for interoperation vectors.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalReason {
+    /// The local user or application cancelled the ceremony.
+    Cancelled,
+    /// The blind mailbox reached its original expiry.
+    Expired,
+    /// The mailbox closed before the endpoint completed.
+    MailboxClosed,
+    /// A third claimant crowded the mailbox.
+    MailboxCrowded,
+    /// The mailbox observed a conflicting sequence retry.
+    MailboxConflict,
     /// Explicit user decline.
     Declined,
     /// A CBCL control or role verdict was a permanent violation.
@@ -423,6 +493,33 @@ impl EndpointReducer {
         }
     }
 
+    /// Terminate after a local cancellation and erase all secret-bearing state.
+    pub fn cancel(&mut self) -> Result<Vec<EndpointEffect>, ReducerError> {
+        self.ensure_live()?;
+        self.terminate(TerminalReason::Cancelled);
+        Ok(vec![EndpointEffect::CloseMailbox])
+    }
+
+    /// Apply an authenticated transport close to the endpoint.
+    ///
+    /// The effectful shell supplies this event after recognising the relay
+    /// message. In particular, an `Expired` event is the explicit time input
+    /// that terminates an attempt whose next protocol frame was omitted.
+    pub fn relay_closed(
+        &mut self,
+        reason: crate::wire::CloseReason,
+    ) -> Result<Vec<EndpointEffect>, ReducerError> {
+        self.ensure_live()?;
+        let terminal = match reason {
+            crate::wire::CloseReason::Closed => TerminalReason::MailboxClosed,
+            crate::wire::CloseReason::Crowded => TerminalReason::MailboxCrowded,
+            crate::wire::CloseReason::Expired => TerminalReason::Expired,
+            crate::wire::CloseReason::Conflict => TerminalReason::MailboxConflict,
+        };
+        self.terminate(terminal);
+        Ok(vec![EndpointEffect::CloseMailbox])
+    }
+
     /// Retry one exact peer Finished control retained after an `Unknown`
     /// verdict. This remains effect-free while unresolved.
     pub fn retry_pending_finished(&mut self) -> Result<Vec<EndpointEffect>, ReducerError> {
@@ -583,6 +680,13 @@ impl EndpointReducer {
         self.record.status()
     }
 
+    /// Borrow the durable record after every transition so the effectful shell
+    /// can commit it before acknowledging or processing further input.
+    #[must_use]
+    pub const fn invitation_record(&self) -> &InvitationRecord {
+        &self.record
+    }
+
     /// Return the terminal classification, if any.
     #[must_use]
     pub fn terminal_reason(&self) -> Option<TerminalReason> {
@@ -637,6 +741,9 @@ impl EndpointReducer {
         if self.local_finished.is_none() {
             return self.fail(TerminalReason::ProtocolViolation, ReducerError::Phase);
         }
+        if self.pending_channel.is_none() || self.channel.is_some() {
+            return self.fail(TerminalReason::ProtocolViolation, ReducerError::Phase);
+        }
         self.validate_expected_role_keys()?;
         let expected = match side {
             Side::Allocator => BootstrapPerformative::FinishedA,
@@ -668,7 +775,12 @@ impl EndpointReducer {
             }
             ProtocolVerdict::Valid => {
                 self.pending_finished = None;
-                let pending = self.pending_channel.take().ok_or(ReducerError::Phase)?;
+                let pending = match self.pending_channel.take() {
+                    Some(value) => value,
+                    None => {
+                        return self.fail(TerminalReason::ProtocolViolation, ReducerError::Phase)
+                    }
+                };
                 let channel = match pending.confirm(value) {
                     Ok(channel) => channel,
                     Err(_) => {
@@ -1065,6 +1177,23 @@ impl EndpointReducer {
         self.payload_control_hash = None;
         self.outbound_payload_sent = false;
     }
+}
+
+fn integer_u64(value: &Value) -> Option<u64> {
+    let Value::Integer(value) = value else {
+        return None;
+    };
+    u64::try_from(*value).ok()
+}
+
+fn fixed_value<const LENGTH: usize>(value: &Value) -> Result<[u8; LENGTH], ReducerError> {
+    let Value::Bytes(bytes) = value else {
+        return Err(ReducerError::Recognition);
+    };
+    bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| ReducerError::Recognition)
 }
 
 fn attempt_binding(

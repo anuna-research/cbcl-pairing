@@ -5,6 +5,16 @@ on:
   pull_request:
 
 jobs:
+  supply-chain:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Advisory, licence, duplicate, and source policy
+        uses: EmbarkStudios/cargo-deny-action@v2.1.1
+        with:
+          command: check
+          arguments: --all-features
+
   rust:
     runs-on: docker
     container:

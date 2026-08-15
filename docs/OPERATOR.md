@@ -17,24 +17,29 @@ invitation allocation is not authorised by SPEC-072 yet.
 - hard mailbox, queued-byte, and limiter-entry caps;
 - closed log and metric dimensions.
 
-It is an in-memory reference service. Restart loses every mailbox, so it is not
-a durable production topology.
+The process supports an explicitly ephemeral in-memory adapter and an atomic
+directory-backed adapter. Neither makes the unreviewed protocol production
+ready.
 
 ## Network boundary
 
-`cbcl-pairing-relay` listens on plain TCP using:
+`cbcl-pairing-relay-ws` accepts an RFC 6455 WebSocket and carries exactly one
+deterministic-CBOR message in each binary WebSocket message. Text messages are
+rejected. This is the reference application-facing shell.
+
+`cbcl-pairing-relay` is the lower-level private TCP shell using:
 
 ```text
 uint32 big-endian length || one deterministic-CBOR message
 ```
 
-Bind it to a private/loopback address and terminate authenticated TLS or WSS in
-front of it. Preserve the canonical peer address for limiter input; the current
-reference binary uses the direct TCP peer IP, so an untrusted proxy would make
-all clients share or spoof limiter identity. Do not expose the listener directly
-to the public Internet.
+Bind either shell to a private/loopback address and terminate authenticated TLS
+or WSS in front of it. The reference processes do not implement TLS. Preserve
+the canonical peer address for limiter input; both binaries use the direct TCP
+peer IP, so an untrusted proxy would make all clients share or spoof limiter
+identity. Do not expose either listener directly to the public Internet.
 
-The maximum accepted length-delimited message is 70,000 octets. Every
+The maximum accepted protocol message is 70,000 octets in either shell. Every
 connection must send `ClientMessage::Bind` before any other operation.
 
 ## Operator key
@@ -57,13 +62,14 @@ all existing pseudonymous peer dimensions unreachable.
 
 ## Validate configuration
 
-Build the gated binary and check its arguments/key without listening:
+Build the gated WebSocket binary and check its arguments/key without listening:
 
 ```sh
-cargo build --features relay --bin cbcl-pairing-relay
-target/debug/cbcl-pairing-relay \
+cargo build --features relay --bin cbcl-pairing-relay-ws
+target/debug/cbcl-pairing-relay-ws \
   --listen 127.0.0.1:7443 \
   --operator-key-file ./operator.key \
+  --store-dir ./mailboxes \
   --check-config
 ```
 
@@ -71,20 +77,30 @@ Allocation remains disabled in the resulting service. The printed
 `allocation=disabled-by-default` value is intentionally not overridden by a
 configuration file or environment variable.
 
+`--store-dir` selects canonical, directory-backed mailbox records with private
+file permissions and atomic replacement. Records contain only membership
+hashes, expiry and sequence metadata, and opaque queued bodies. Omitting the
+option selects the deliberately ephemeral memory adapter.
+
 ## Run a conformance instance
 
 Only an isolated conformance environment may use:
 
 ```sh
-target/debug/cbcl-pairing-relay \
+target/debug/cbcl-pairing-relay-ws \
   --listen 127.0.0.1:7443 \
   --operator-key-file ./operator.key \
+  --store-dir ./mailboxes \
   --enable-conformance-allocation
 ```
 
 The process prints its resolved listen address once. The enabling flag is not a
 production enable switch; it exists to exercise the protocol while required
 reviews are open.
+
+For rollback, stop the listener and invoke the same durable configuration with
+`--emergency-close`. This disables allocation, deletes every queued body, and
+retains only body-free tombstones through each original expiry.
 
 The reference defaults are 240 attempts per operation per 60 seconds, a 300
 second cooldown, 100,000 limiter entries, 10,000 open mailboxes, and 512 MiB of
@@ -114,8 +130,10 @@ must preserve the closed dimensions.
 - A third distinct claimant crowds the mailbox and terminally deletes bodies.
 - Sequence gaps or conflicting retries close the mailbox.
 - Acknowledgement deletes the corresponding queued body immediately.
-- Restart of this reference process loses all in-memory mailboxes. Clients must
-  recover with fresh invitations; never reuse a carrier.
+- Restart with the memory adapter loses every mailbox. Restart with the
+  directory adapter reconstructs mailboxes, queued bodies, acknowledgements,
+  and original expiries from canonical records. Never reuse an expired or
+  closed carrier in either mode.
 - A relay can deny, delay, replay, reorder, omit, or fork delivery. Endpoint
   authentication detects integrity-affecting manipulation but cannot restore
   availability.
@@ -128,9 +146,13 @@ Profiles and client code do not change between operators. Operator keys,
 limiter dimensions, logs, capacity, and observed network metadata remain local
 to each deployment.
 
-`tests/relay_process.rs` starts two isolated processes with distinct operator
+`tests/relay_process.rs` starts two isolated TCP processes with distinct operator
 keys and carries complete agent and credential ceremonies over each: CPace,
 Finished, projected intent, approval, payload, grant, acknowledgement, and
 close. It compares the resulting display/grant state and verifies that logs
 remain application-blind. This is local implementer evidence; the production
 gate still requires the named integration-review disposition.
+
+`tests/websocket_process.rs` starts the standard WebSocket shell, connects two
+real clients, routes an opaque frame asynchronously, rejects text frames, and
+checks that process logs contain neither mailbox IDs nor bodies.

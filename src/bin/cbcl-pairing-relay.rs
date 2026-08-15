@@ -8,6 +8,7 @@ use cbcl_pairing::{
     limiter::{LimiterConfig, OperationPolicy},
     observability::CapacityCaps,
     relay::{ConnectionId, RelayConfig, RelayRandomness, RelayService, RoutedMessage},
+    storage::FileMailboxStore,
     wire::{decode_client_message, encode_server_message, ServerMessage},
 };
 use std::{
@@ -38,6 +39,8 @@ struct Args {
     operator_key_file: PathBuf,
     conformance_allocation: bool,
     check_config: bool,
+    store_dir: Option<PathBuf>,
+    emergency_close: bool,
 }
 
 type Writers = Arc<Mutex<BTreeMap<ConnectionId, Arc<Mutex<TcpStream>>>>>;
@@ -55,7 +58,7 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
     let operator_key = read_operator_key(&args.operator_key_file)?;
-    let service = RelayService::new(RelayConfig {
+    let config = RelayConfig {
         operator_key,
         limiter: LimiterConfig::new(
             OperationPolicy {
@@ -71,8 +74,25 @@ fn run() -> Result<(), String> {
             limiter_entries: DEFAULT_LIMITER_CAP as u64,
         },
         allocation_enabled: args.conformance_allocation,
-    })
+    };
+    let mut service = match &args.store_dir {
+        Some(directory) => RelayService::with_store(
+            config,
+            Box::new(FileMailboxStore::open(directory).map_err(|error| error.to_string())?),
+        ),
+        None => RelayService::new(config),
+    }
     .map_err(|error| error.to_string())?;
+    if args.emergency_close {
+        if args.store_dir.is_none() {
+            return Err("--emergency-close requires --store-dir".into());
+        }
+        service
+            .emergency_close(unix_time())
+            .map_err(|error| error.to_string())?;
+        println!("EMERGENCY CLOSE OK allocation=disabled");
+        return Ok(());
+    }
     if args.check_config {
         println!("CONFIG OK allocation=disabled-by-default");
         return Ok(());
@@ -117,6 +137,8 @@ fn parse_args() -> Result<Args, String> {
     let mut operator_key_file = None;
     let mut conformance_allocation = false;
     let mut check_config = false;
+    let mut store_dir = None;
+    let mut emergency_close = false;
     let mut args = env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -131,9 +153,15 @@ fn parse_args() -> Result<Args, String> {
             }
             "--enable-conformance-allocation" => conformance_allocation = true,
             "--check-config" => check_config = true,
+            "--store-dir" => {
+                store_dir = Some(PathBuf::from(
+                    args.next().ok_or("--store-dir requires a path")?,
+                ));
+            }
+            "--emergency-close" => emergency_close = true,
             "--help" | "-h" => {
                 return Err(
-                    "usage: cbcl-pairing-relay --listen ADDR --operator-key-file PATH [--enable-conformance-allocation] [--check-config]".into(),
+                    "usage: cbcl-pairing-relay --listen ADDR --operator-key-file PATH [--store-dir DIR] [--enable-conformance-allocation] [--check-config] [--emergency-close]".into(),
                 );
             }
             _ => return Err(format!("unknown argument: {argument}")),
@@ -144,6 +172,8 @@ fn parse_args() -> Result<Args, String> {
         operator_key_file: operator_key_file.ok_or("missing --operator-key-file")?,
         conformance_allocation,
         check_config,
+        store_dir,
+        emergency_close,
     })
 }
 

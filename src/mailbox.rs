@@ -228,8 +228,6 @@ pub struct MailboxTransition {
 /// Closed error set for mailbox-domain validation failures.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MailboxError {
-    /// Behavioural stub used only for the detailed Red Gate.
-    NotImplemented,
     /// Requested lifetime falls outside 60 through 600 seconds.
     LifetimeOutOfRange,
     /// Absolute expiry cannot be represented.
@@ -255,6 +253,8 @@ pub enum MailboxError {
     UnknownSequence,
     /// A new claimant hash collides with an existing membership.
     MembershipCollision,
+    /// Persisted mailbox state violates a structural or cryptographic invariant.
+    InvalidSnapshot,
 }
 
 impl MailboxError {
@@ -266,7 +266,7 @@ impl MailboxError {
             Self::NotMember => 404,
             Self::Closed(_) => 410,
             Self::BodySize => 413,
-            Self::NotImplemented | Self::ExpiryOverflow => 503,
+            Self::ExpiryOverflow | Self::InvalidSnapshot => 503,
             Self::SequenceGap { .. }
             | Self::FrameLimit
             | Self::UnknownSequence
@@ -356,6 +356,87 @@ impl Mailbox {
             membership_hashes,
             sequences,
         }
+    }
+
+    /// Reconstruct validated pure state from the persistence boundary.
+    pub(crate) fn from_snapshot(snapshot: MailboxSnapshot) -> Result<Self, MailboxError> {
+        if snapshot.nameplate.is_some_and(|value| value > 999_999_999)
+            || snapshot.membership_hashes.is_empty()
+            || snapshot.membership_hashes.len() > 2
+        {
+            return Err(MailboxError::InvalidSnapshot);
+        }
+        match snapshot.status {
+            MailboxStatus::Waiting if snapshot.membership_hashes.len() != 1 => {
+                return Err(MailboxError::InvalidSnapshot)
+            }
+            MailboxStatus::Paired if snapshot.membership_hashes.len() != 2 => {
+                return Err(MailboxError::InvalidSnapshot)
+            }
+            _ => {}
+        }
+        let member = |owner: Membership, hash: MembershipHash| {
+            let mut sequences: Vec<_> = snapshot
+                .sequences
+                .iter()
+                .filter(|sequence| sequence.owner == owner)
+                .cloned()
+                .collect();
+            sequences.sort_by_key(|sequence| sequence.seq);
+            if sequences.len() > MAX_FRAMES_PER_MEMBERSHIP
+                || sequences
+                    .iter()
+                    .enumerate()
+                    .any(|(index, sequence)| usize::from(sequence.seq) != index)
+            {
+                return Err(MailboxError::InvalidSnapshot);
+            }
+            let mut frames = Vec::with_capacity(sequences.len());
+            for sequence in sequences {
+                if sequence.body_len == 0 || sequence.body_len > MAX_FRAME_BODY_BYTES {
+                    return Err(MailboxError::InvalidSnapshot);
+                }
+                if let Some(body) = &sequence.body {
+                    let digest: [u8; 32] = Sha256::digest(body).into();
+                    if body.len() != sequence.body_len || digest != sequence.body_digest {
+                        return Err(MailboxError::InvalidSnapshot);
+                    }
+                }
+                frames.push(FrameRecord {
+                    seq: sequence.seq,
+                    digest: sequence.body_digest,
+                    body_len: sequence.body_len,
+                    body: sequence.body,
+                });
+            }
+            Ok(MemberState {
+                hash,
+                next_seq: u8::try_from(frames.len()).map_err(|_| MailboxError::InvalidSnapshot)?,
+                frames,
+            })
+        };
+        let allocator = member(Membership::Allocator, snapshot.membership_hashes[0])?;
+        let claimant = snapshot
+            .membership_hashes
+            .get(1)
+            .copied()
+            .map(|hash| member(Membership::Claimant, hash))
+            .transpose()?;
+        if snapshot
+            .sequences
+            .iter()
+            .any(|sequence| sequence.owner == Membership::Claimant && claimant.is_none())
+        {
+            return Err(MailboxError::InvalidSnapshot);
+        }
+        Ok(Self {
+            mailbox_id: snapshot.mailbox_id,
+            nameplate: snapshot.nameplate,
+            expires_at: snapshot.expires_at,
+            status: snapshot.status,
+            allocator,
+            claimant,
+        })
     }
 
     fn member(&self, membership: Membership) -> Option<&MemberState> {

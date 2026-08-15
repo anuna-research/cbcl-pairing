@@ -5,6 +5,7 @@
 //! are never registered with or consulted by the relay.
 
 use crate::wire::{ApplicationPayload, Invitation, Locator, PairingIntent};
+use bip39::Language;
 use ciborium::Value;
 use sha2::{Digest, Sha256};
 use std::{fmt, io::Cursor};
@@ -400,6 +401,71 @@ pub fn encode_agent_word_indices(first: u16, second: u16) -> Result<[u8; 4], Pro
     result[..2].copy_from_slice(&first.to_be_bytes());
     result[2..].copy_from_slice(&second.to_be_bytes());
     Ok(result)
+}
+
+/// Generated two-word agent carrier under the pinned English BIP-39 list.
+///
+/// The value carries exactly two independent 11-bit indices. It is constructed
+/// either from 22 shell-supplied CSPRNG bits or by recognising received words;
+/// there is no API for choosing arbitrary indices as a new invitation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentWordPair {
+    indices: [u16; 2],
+    secret: [u8; 4],
+}
+
+impl AgentWordPair {
+    /// Generate a carrier from three CSPRNG octets supplied by the effectful
+    /// application shell. The low two surplus bits are discarded, leaving a
+    /// uniform 22-bit value split into two independent 11-bit indices.
+    #[must_use]
+    pub fn from_csprng_octets(octets: [u8; 3]) -> Self {
+        let value = u32::from_be_bytes([0, octets[0], octets[1], octets[2]]) >> 2;
+        let first = ((value >> 11) & 0x7ff) as u16;
+        let second = (value & 0x7ff) as u16;
+        Self {
+            indices: [first, second],
+            secret: encode_agent_word_indices(first, second)
+                .expect("masked 11-bit indices are always valid"),
+        }
+    }
+
+    /// Recognise two received words under the exact English BIP-39 list.
+    pub fn recognise(first: &str, second: &str) -> Result<Self, ProfileError> {
+        let language = Language::English;
+        let first = language
+            .find_word(first)
+            .ok_or(ProfileError::InvalidInvitation)?;
+        let second = language
+            .find_word(second)
+            .ok_or(ProfileError::InvalidInvitation)?;
+        Ok(Self {
+            indices: [first, second],
+            secret: encode_agent_word_indices(first, second)?,
+        })
+    }
+
+    /// Return the two exact English BIP-39 words for display.
+    #[must_use]
+    pub fn words(&self) -> [&'static str; 2] {
+        let words = Language::English.word_list();
+        [
+            words[usize::from(self.indices[0])],
+            words[usize::from(self.indices[1])],
+        ]
+    }
+
+    /// Return the normative four-octet CPace `PRS` carrier encoding.
+    #[must_use]
+    pub const fn secret(&self) -> [u8; 4] {
+        self.secret
+    }
+
+    /// Return both word-list indices for carrier integrations.
+    #[must_use]
+    pub const fn indices(&self) -> [u16; 2] {
+        self.indices
+    }
 }
 
 /// Built-in agent pairing profile with an application-supplied SPEC-061

@@ -63,8 +63,9 @@ transport can carry the same canonical channel frames themselves.
   invitation consumption, cryptographic gates, consent uniqueness, and erasure.
 - `profile`: agent, credential, and synthetic conformance profiles plus the
   extension boundary for other applications.
-- `mailbox`, `limiter`, `observability`, and `relay`: application-unaware,
-  bounded relay primitives and a reference TCP process.
+- `mailbox`, `storage`, `limiter`, `observability`, and `relay`:
+  application-unaware, bounded relay primitives plus reference TCP and
+  WebSocket processes.
 - `dialects`, `schemas`, and `vectors`: pinned interoperable protocol assets.
 - `evidence`: dated red/green conformance records. These are not substitutes
   for the outstanding independent reviews.
@@ -78,6 +79,7 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 cargo doc --no-deps --all-features
+cargo deny --all-features check
 tools/run-mutations.sh
 tools/run-fuzz-budgets.sh
 ```
@@ -107,17 +109,20 @@ The executable endpoint composition in `tests/endpoint.rs` and the two-process
 relay exercise in `tests/relay_process.rs` are the current end-to-end reference
 fixtures.
 
-## Reference relay
+## Reference relays
 
-The `relay` feature builds `cbcl-pairing-relay`. It is a private, four-byte
-big-endian length-delimited TCP listener intended to sit behind TLS/WSS
-termination. Allocation is closed by default and the only enabling flag is
-explicitly named for conformance use.
+The `relay` feature builds two shells around the same blind `RelayService`.
+`cbcl-pairing-relay-ws` is the standard RFC 6455 WebSocket boundary for
+applications. `cbcl-pairing-relay` is a private four-byte big-endian
+length-delimited TCP boundary for controlled integrations. Both carry one exact
+canonical-CBOR protocol message per binary unit, require TLS/WSS termination in
+front of the listener, and keep allocation closed by default.
 
 ```sh
-cargo run --features relay --bin cbcl-pairing-relay -- \
+cargo run --features relay --bin cbcl-pairing-relay-ws -- \
   --listen 127.0.0.1:7443 \
   --operator-key-file ./operator.key \
+  --store-dir ./mailboxes \
   --check-config
 ```
 

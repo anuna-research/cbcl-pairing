@@ -13,31 +13,38 @@ path = "src/lib.rs"
 [features]
 default = ["std"]
 std = []
-relay = ["std", "dep:getrandom"]
+relay = ["std", "dep:getrandom", "dep:tungstenite"]
 
 [dependencies]
 aes-gcm = { version = "=0.11.0", default-features = false, features = ["aes", "alloc", "zeroize"] }
-cbcl-core = { git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
-cbcl-parser = { git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
-cbor2 = "1.1"
-cddl-cat = { version = "0.7", default-features = false, features = ["ciborium"] }
-ciborium = "0.2"
+bip39 = { version = "=2.2.2", default-features = false, features = ["std"] }
+cbcl-core = { version = "=0.1.0", git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
+cbcl-parser = { version = "=0.1.0", git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
+cbor2 = "=1.1.4"
+cddl-cat = { version = "=0.7.1", default-features = false, features = ["ciborium"] }
+ciborium = "=0.2.2"
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["alloc", "fast", "zeroize"] }
 fiat-crypto = { version = "=0.3.0", default-features = false }
 getrandom = { version = "=0.3.4", optional = true }
 hmac = { version = "=0.13.0", features = ["zeroize"] }
 hkdf = "=0.13.0"
 sha2 = { version = "=0.11.0", default-features = false, features = ["zeroize"] }
-subtle = "2.6"
-url = "2.5"
+subtle = "=2.6.1"
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"], optional = true }
+url = "=2.5.8"
 x25519-dalek = { version = "=2.0.1", default-features = false, features = ["zeroize"] }
-zeroize = "1.8"
+zeroize = "=1.9.0"
 
 [dev-dependencies]
-hex = "0.4"
-serde_json = "1"
+hex = "=0.4.3"
+serde_json = "=1.0.151"
 
 [[bin]]
 name = "cbcl-pairing-relay"
 path = "src/bin/cbcl-pairing-relay.rs"
+required-features = ["relay"]
+
+[[bin]]
+name = "cbcl-pairing-relay-ws"
+path = "src/bin/cbcl-pairing-relay-ws.rs"
 required-features = ["relay"]

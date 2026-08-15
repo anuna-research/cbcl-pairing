@@ -80,7 +80,17 @@ cannot represent.
 | Intent | Allocator calls `send_intent`; claimant calls `receive_frame` | one fully profile-recognised `DisplayIntent` effect |
 | Consent | Claimant calls `decide(Approve)` or `decide(Decline)` | decline emits `CloseMailbox` and erases secrets |
 | Payload | After approval, allocator calls `send_payload`; claimant calls `receive_frame` | one digest-bound `DeliverGrant` after one verifier call |
-| Terminal | Shell obeys `CloseMailbox` | no invitation or key reuse |
+| Terminal | Shell calls `cancel` or `relay_closed`, and obeys `CloseMailbox` | omission/expiry, relay failure, cancellation, decline, and protocol errors erase keys and forbid reuse |
+
+`InvitationRecord::bind` must be committed durably before the first peer CPace
+frame is processed. An exact active binding may resume after a crash; any
+different mailbox, peer frame, or context spends the invitation. Persist the
+record again after every reducer call by reading `invitation_record`; its
+deterministic `encode`/`decode` form is the stable local storage boundary.
+If cancellation or expiry happens before a reducer exists, call
+`InvitationRecord::consume` and commit the spent record. Once a reducer exists,
+feed recognised relay terminal events through `relay_closed`; this supplies the
+explicit time/transport transition for an omitted peer frame.
 
 All `SendFrame` effects contain already-protected channel frames. Encode them
 before giving them to an untrusted transport. An `EndpointEffect` is a request
@@ -104,8 +114,13 @@ The built-in profiles are:
 - `SyntheticProfile`: conformance only, never a production policy.
 
 The agent carrier is exactly two big-endian `u16` indices in `0..=2047`, or 22
-bits of generated choice. `encode_agent_word_indices` creates those four bytes;
-the application maps indices to its pinned 2048-word list for display and input.
+bits of generated choice. `AgentWordPair::from_csprng_octets` consumes three
+OS-CSPRNG octets supplied by the application, discards two surplus bits, and
+maps the remaining uniform value to the pinned English BIP-39 list.
+`AgentWordPair::recognise` performs exact received-word recognition without case
+folding or Unicode normalisation. `encode_agent_word_indices` remains the
+normative wire codec; invitation creators use the generation API, not
+user-selected indices.
 
 `GrantVerifier` is intentionally application-owned. The pairing crate does not
 reinterpret an app's authority, revocation, account, credential, or delegation
@@ -120,10 +135,11 @@ randomness. It returns `RoutedMessage` values for one or both live connections.
 `disconnect` preserves the mailbox for resume, while `sweep` expires mailboxes
 and limiter entries.
 
-The service is in-memory. Durable storage is a deployment choice, but a durable
-adapter must retain only the state represented by `MailboxSnapshot` and must
-honour identical acknowledgement, closure, terminal deletion, and original-
-expiry semantics.
+`RelayService::new` uses `MemoryMailboxStore`. `RelayService::with_store`
+injects another `MailboxStore`; the included `FileMailboxStore` performs
+canonical recognition on restart and atomic durable replacement. Every adapter
+retains only `MailboxSnapshot` state and must honour identical acknowledgement,
+closure, terminal deletion, and original-expiry semantics.
 
 ## Errors and terminal handling
 
