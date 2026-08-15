@@ -9,6 +9,7 @@
 pub mod cbcl_protocol;
 pub mod channel;
 pub mod cpace;
+pub mod endpoint;
 pub mod limiter;
 pub mod mailbox;
 pub mod observability;
