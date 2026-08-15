@@ -445,8 +445,28 @@ impl SessionMonitor {
         claimant: &CeremonyKeyId,
         control: &[u8],
     ) -> Result<(Self, Admission), ProtocolError> {
+        Self::open_for_ceremony(
+            &ceremony_id(invitation),
+            local_role,
+            allocator,
+            claimant,
+            control,
+        )
+    }
+
+    /// Verify and admit the inert role opener using an already derived
+    /// ceremony identifier, so callers need not retain secret-bearing
+    /// invitation bytes after CPace begins.
+    pub fn open_for_ceremony(
+        ceremony: &str,
+        local_role: PairingRole,
+        allocator: &CeremonyKeyId,
+        claimant: &CeremonyKeyId,
+        control: &[u8],
+    ) -> Result<(Self, Admission), ProtocolError> {
+        validate_ceremony(ceremony)?;
         let dialects = PairingDialects::install()?;
-        let thread = ThreadId(ceremony_id(invitation));
+        let thread = ThreadId(ceremony.into());
         let verified = recognise_signed_control(control, true)?;
         if verified.signer != *allocator {
             return Err(ProtocolError::RoleOpener);

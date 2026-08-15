@@ -3,8 +3,9 @@
 use cbcl_core::message::CausedBy;
 use cbcl_pairing::{
     cbcl_protocol::{
-        build_bootstrap_control, BootstrapMonitor, BootstrapPerformative, CeremonySigningKey,
-        ProtocolVerdict,
+        build_bootstrap_control, build_session_control, ceremony_id, BootstrapMonitor,
+        BootstrapPerformative, CeremonySigningKey, PairingRole, ProtocolVerdict, SessionMonitor,
+        SessionPerformative,
     },
     channel::PendingChannel,
     cpace,
@@ -13,10 +14,12 @@ use cbcl_pairing::{
         ReducerError, TerminalReason,
     },
     wire::{
-        encode_channel_frame, encode_invitation, ApplicationPayload, ChannelFrame, Decision,
-        Invitation, Locator, PairingIntent, Side,
+        decode_pairing_intent, decode_sealed_plaintext, encode_channel_frame, encode_invitation,
+        encode_pairing_decision, encode_sealed_plaintext, ApplicationPayload, ChannelFrame,
+        Decision, Invitation, Locator, PairingDecision, PairingIntent, SealedPlaintext, Side,
     },
 };
+use sha2::{Digest, Sha256};
 
 const MAILBOX_ID: [u8; 32] = [0x55; 32];
 const PUBLIC_CONTEXT: &[u8] = b"deterministic SPEC-072 public context";
@@ -353,6 +356,7 @@ fn test_009_decline_erases_both_endpoints_and_releases_no_payload() {
     assert_eq!(claimant.terminal_reason(), Some(TerminalReason::Declined));
     assert!(claimant.secrets_erased());
     assert_eq!(claimant.delivered_payloads(), 0);
+    assert_eq!(claimant.decide(Decision::Decline), Ok(Vec::new()));
 
     let allocator_effects = allocator
         .receive_frame(&decline_frame)
@@ -362,6 +366,7 @@ fn test_009_decline_erases_both_endpoints_and_releases_no_payload() {
     assert!(allocator.secrets_erased());
     assert_eq!(allocator.delivered_payloads(), 0);
     assert_eq!(allocator.invitation_status(), InvitationStatus::Spent);
+    assert_eq!(allocator.receive_frame(&decline_frame), Ok(Vec::new()));
 }
 
 #[test]
@@ -426,4 +431,194 @@ fn approved_payload_is_released_once_and_only_for_the_intent_digest() {
         allocator.send_payload(&wrong),
         Err(ReducerError::IntentDigest)
     );
+}
+
+#[test]
+fn peer_signed_but_wrong_finished_is_terminal_and_erases_keys() {
+    let m = materials();
+    let record = bound_record(&m.invitation, &m.claimant_frame_bytes);
+    let mut allocator = EndpointReducer::new(
+        Side::Allocator,
+        &m.invitation,
+        record,
+        m.allocator_key,
+        m.allocator_monitor,
+        m.allocator_pending,
+        m.allocator_hash.clone(),
+        m.claimant_hash.clone(),
+    )
+    .expect("allocator");
+    allocator
+        .local_finished_frame()
+        .expect("local finished")
+        .expect("valid local Finished");
+
+    let mut wrong_value = m.claimant_pending.local_finished();
+    wrong_value[0] ^= 1;
+    let control = build_bootstrap_control(
+        &m.claimant_key,
+        BootstrapPerformative::FinishedB,
+        &ceremony_id(&m.invitation),
+        &wrong_value,
+        CausedBy::Multiple(vec![m.allocator_hash, m.claimant_hash]),
+    )
+    .expect("attacker controls its own ceremony key");
+    let frame = ChannelFrame::Finished {
+        side: Side::Claimant,
+        control,
+        value: wrong_value,
+    };
+    assert_eq!(allocator.receive_frame(&frame), Err(ReducerError::Channel));
+    assert_eq!(
+        allocator.terminal_reason(),
+        Some(TerminalReason::KeyConfirmation)
+    );
+    assert!(allocator.secrets_erased());
+    assert!(!allocator.session_ready());
+    assert_eq!(allocator.delivered_payloads(), 0);
+    assert_eq!(allocator.invitation_status(), InvitationStatus::Spent);
+}
+
+#[test]
+fn test_022_two_valid_decision_siblings_received_in_sequence_are_terminal() {
+    let m = materials();
+    let allocator_id = m.allocator_key.key_id();
+    let claimant_id = m.claimant_key.key_id();
+    let record = bound_record(&m.invitation, &m.claimant_frame_bytes);
+    let mut allocator = EndpointReducer::new(
+        Side::Allocator,
+        &m.invitation,
+        record,
+        m.allocator_key,
+        m.allocator_monitor,
+        m.allocator_pending,
+        m.allocator_hash.clone(),
+        m.claimant_hash.clone(),
+    )
+    .expect("allocator");
+    let allocator_finished = allocator
+        .local_finished_frame()
+        .expect("allocator finished")
+        .expect("valid");
+    let ChannelFrame::Finished {
+        value: allocator_finished_value,
+        ..
+    } = allocator_finished
+    else {
+        unreachable!()
+    };
+
+    let claimant_finished_value = m.claimant_pending.local_finished();
+    let claimant_finished_control = build_bootstrap_control(
+        &m.claimant_key,
+        BootstrapPerformative::FinishedB,
+        &ceremony_id(&m.invitation),
+        &claimant_finished_value,
+        CausedBy::Multiple(vec![m.allocator_hash.clone(), m.claimant_hash.clone()]),
+    )
+    .expect("claimant Finished control");
+    let claimant_finished = ChannelFrame::Finished {
+        side: Side::Claimant,
+        control: claimant_finished_control,
+        value: claimant_finished_value,
+    };
+    let mut claimant_channel = m
+        .claimant_pending
+        .confirm(&allocator_finished_value)
+        .expect("claimant confirms allocator");
+    let opener_effects = allocator
+        .receive_frame(&claimant_finished)
+        .expect("allocator confirms claimant");
+    let opener_frame = extract_frame(&opener_effects);
+    let opener_plaintext = decode_sealed_plaintext(
+        &claimant_channel
+            .open(&opener_frame)
+            .expect("open allocator role opener"),
+    )
+    .expect("opener plaintext");
+    let ceremony = ceremony_id(&m.invitation);
+    let (mut claimant_session, _) = SessionMonitor::open_for_ceremony(
+        &ceremony,
+        PairingRole::Claimant,
+        &allocator_id,
+        &claimant_id,
+        &opener_plaintext.control,
+    )
+    .expect("claimant role monitor");
+
+    let intent_frame = allocator.send_intent(&intent()).expect("allocator intent");
+    let intent_plaintext = decode_sealed_plaintext(
+        &claimant_channel
+            .open(&intent_frame)
+            .expect("open allocator intent"),
+    )
+    .expect("intent plaintext");
+    let intent_body = intent_plaintext.body.as_deref().expect("intent body");
+    let intent_value = decode_pairing_intent(intent_body).expect("intent value");
+    let intent_bytes =
+        cbcl_pairing::wire::encode_pairing_intent(&intent_value).expect("intent encoding");
+    let intent_digest: [u8; 32] = Sha256::digest(intent_bytes).into();
+    let intent_hash = claimant_session
+        .admit(
+            SessionPerformative::Intent,
+            &intent_plaintext.control,
+            intent_body,
+        )
+        .expect("intent CBCL")
+        .content_hash()
+        .to_owned();
+
+    for (index, decision) in [Decision::Approve, Decision::Decline]
+        .into_iter()
+        .enumerate()
+    {
+        let body = encode_pairing_decision(&PairingDecision {
+            intent_digest,
+            decision,
+        })
+        .expect("decision body");
+        let performative = match decision {
+            Decision::Approve => SessionPerformative::Approve,
+            Decision::Decline => SessionPerformative::Decline,
+        };
+        let control = build_session_control(
+            &m.claimant_key,
+            performative,
+            &ceremony,
+            &allocator_id,
+            &body,
+            CausedBy::Single(intent_hash.clone()),
+        )
+        .expect("decision control");
+        assert_eq!(
+            claimant_session
+                .admit(performative, &control, &body)
+                .expect("individual sibling verdict")
+                .verdict(),
+            ProtocolVerdict::Valid
+        );
+        let plaintext = encode_sealed_plaintext(&SealedPlaintext {
+            control,
+            body: Some(body),
+        })
+        .expect("decision plaintext");
+        let frame = claimant_channel.seal(&plaintext).expect("contiguous frame");
+        if index == 0 {
+            assert!(allocator
+                .receive_frame(&frame)
+                .expect("approval accepted")
+                .is_empty());
+        } else {
+            assert_eq!(
+                allocator.receive_frame(&frame),
+                Err(ReducerError::DecisionConflict)
+            );
+        }
+    }
+    assert_eq!(
+        allocator.terminal_reason(),
+        Some(TerminalReason::DecisionConflict)
+    );
+    assert!(allocator.secrets_erased());
+    assert_eq!(allocator.delivered_payloads(), 0);
 }
