@@ -46,6 +46,9 @@ pub enum ComponentStatus {
 /// [`ComponentStatus::NotImplemented`]. Each implementation task removes its
 /// corresponding Red Gate assertion before it can be accepted.
 #[must_use]
-pub const fn component_status(_name: &str) -> ComponentStatus {
-    ComponentStatus::NotImplemented
+pub fn component_status(name: &str) -> ComponentStatus {
+    match name {
+        "canonical-recognisers" => ComponentStatus::Implemented,
+        _ => ComponentStatus::NotImplemented,
+    }
 }
