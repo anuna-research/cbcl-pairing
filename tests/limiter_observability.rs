@@ -6,7 +6,7 @@ use cbcl_pairing::{
     },
     observability::{CapacityCaps, RelayGauges, RelayObservability, RelayOutcome},
 };
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 const OPERATOR_KEY: [u8; 32] = [0x55; 32];

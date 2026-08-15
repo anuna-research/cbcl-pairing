@@ -96,6 +96,45 @@ fn each_corrupt_finished_value_blocks_channel_activation() {
 }
 
 #[test]
+fn wrong_cpace_secret_fails_explicit_key_confirmation() {
+    let sid = [9_u8; 32];
+    let (a_state, a_message) = start(
+        Side::Allocator,
+        b"correct secret",
+        b"shared context",
+        &sid,
+        b"ADa",
+        [3; 32],
+    )
+    .expect("start A");
+    let (b_state, b_message) = start(
+        Side::Claimant,
+        b"wrong secret",
+        b"shared context",
+        &sid,
+        b"ADb",
+        [4; 32],
+    )
+    .expect("start B");
+    let a_isk = finish(a_state, &b_message).expect("finish A");
+    let b_isk = finish(b_state, &a_message).expect("finish B");
+    let allocator = PendingChannel::new(Side::Allocator, a_isk, PUBLIC_CONTEXT, A_FRAME, B_FRAME)
+        .expect("derive A");
+    let claimant = PendingChannel::new(Side::Claimant, b_isk, PUBLIC_CONTEXT, A_FRAME, B_FRAME)
+        .expect("derive B");
+    let a_finished = allocator.local_finished();
+    let b_finished = claimant.local_finished();
+    assert!(matches!(
+        allocator.confirm(&b_finished),
+        Err(ChannelError::FinishedMismatch)
+    ));
+    assert!(matches!(
+        claimant.confirm(&a_finished),
+        Err(ChannelError::FinishedMismatch)
+    ));
+}
+
+#[test]
 fn both_directions_roundtrip_with_independent_contiguous_counters() {
     let (allocator, claimant) = pending_pair();
     let a_finished = allocator.local_finished();
@@ -130,6 +169,44 @@ fn both_directions_roundtrip_with_independent_contiguous_counters() {
     assert!(matches!(&b1, ChannelFrame::Sealed { counter: 1, .. }));
     assert_eq!(claimant.open(&a1).expect("open A1"), b"allocator one");
     assert_eq!(allocator.open(&b1).expect("open B1"), b"claimant one");
+}
+
+#[test]
+fn transcript_and_directional_keys_are_separated() {
+    let (mut allocator, mut claimant) = confirmed_pair();
+    let a_frame = allocator.seal(b"same plaintext").expect("seal A");
+    let b_frame = claimant.seal(b"same plaintext").expect("seal B");
+    let (
+        ChannelFrame::Sealed {
+            ciphertext: a_ciphertext,
+            ..
+        },
+        ChannelFrame::Sealed {
+            ciphertext: b_ciphertext,
+            ..
+        },
+    ) = (&a_frame, &b_frame)
+    else {
+        panic!("sealed frames")
+    };
+    assert_ne!(a_ciphertext, b_ciphertext);
+
+    let (a_isk, b_isk) = official_isks();
+    let allocator = PendingChannel::new(Side::Allocator, a_isk, PUBLIC_CONTEXT, A_FRAME, B_FRAME)
+        .expect("derive A");
+    let claimant = PendingChannel::new(Side::Claimant, b_isk, b"changed-context", A_FRAME, B_FRAME)
+        .expect("derive B");
+    assert_ne!(allocator.transcript_hash(), claimant.transcript_hash());
+    let a_finished = allocator.local_finished();
+    let b_finished = claimant.local_finished();
+    assert!(matches!(
+        allocator.confirm(&b_finished),
+        Err(ChannelError::FinishedMismatch)
+    ));
+    assert!(matches!(
+        claimant.confirm(&a_finished),
+        Err(ChannelError::FinishedMismatch)
+    ));
 }
 
 #[test]
@@ -172,7 +249,30 @@ fn replay_gap_wrong_direction_and_bad_tag_are_terminal() {
     assert_eq!(receiver.open(&corrupt), Err(ChannelError::Terminal));
     cases.push(());
 
-    assert_eq!(cases.len(), 4);
+    let (_, mut receiver) = confirmed_pair();
+    let unexpected = ChannelFrame::Finished {
+        side: Side::Allocator,
+        control: vec![1],
+        value: [0; 64],
+    };
+    assert_eq!(
+        receiver.open(&unexpected),
+        Err(ChannelError::UnexpectedFrame)
+    );
+    assert_eq!(receiver.open(&unexpected), Err(ChannelError::Terminal));
+    cases.push(());
+
+    let (_, mut receiver) = confirmed_pair();
+    let undersized = ChannelFrame::Sealed {
+        direction: Direction::AllocatorToClaimant,
+        counter: 0,
+        ciphertext: vec![0; 16],
+    };
+    assert_eq!(receiver.open(&undersized), Err(ChannelError::MessageSize));
+    assert_eq!(receiver.open(&undersized), Err(ChannelError::Terminal));
+    cases.push(());
+
+    assert_eq!(cases.len(), 6);
 }
 
 #[test]
@@ -200,6 +300,7 @@ fn nonce_aad_and_size_bounds_are_exact() {
     );
 
     let (mut sender, _) = confirmed_pair();
+    assert_eq!(sender.seal(b""), Err(ChannelError::MessageSize));
     assert_eq!(
         sender.seal(&vec![0; MAX_SEALED_PLAINTEXT + 1]),
         Err(ChannelError::MessageSize)
@@ -207,9 +308,15 @@ fn nonce_aad_and_size_bounds_are_exact() {
     let largest = sender
         .seal(&vec![0; MAX_SEALED_PLAINTEXT])
         .expect("largest legal plaintext");
-    let ChannelFrame::Sealed { ciphertext, .. } = largest else {
+    let ChannelFrame::Sealed {
+        counter,
+        ciphertext,
+        ..
+    } = largest
+    else {
         panic!("sealed frame")
     };
+    assert_eq!(counter, 0, "local size errors do not consume a nonce");
     assert_eq!(ciphertext.len(), MAX_SEALED_PLAINTEXT + 16);
 }
 

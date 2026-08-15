@@ -57,6 +57,7 @@ pub fn component_status(name: &str) -> ComponentStatus {
         "mailbox-core" => ComponentStatus::Implemented,
         "limiter-observability" => ComponentStatus::Implemented,
         "cpace-core" => ComponentStatus::Implemented,
+        "secure-channel" => ComponentStatus::Implemented,
         _ => ComponentStatus::NotImplemented,
     }
 }
