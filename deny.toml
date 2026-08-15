@@ -20,6 +20,10 @@ allow = [
     "Zlib",
 ]
 
+[[licenses.exceptions]]
+crate = "libfuzzer-sys"
+allow = ["NCSA"]
+
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"

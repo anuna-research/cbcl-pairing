@@ -14,6 +14,12 @@ jobs:
         with:
           command: check
           arguments: --all-features
+      - name: Fuzz-harness supply-chain policy
+        uses: EmbarkStudios/cargo-deny-action@v2.1.1
+        with:
+          command: check
+          arguments: --all-features
+          manifest-path: fuzz/Cargo.toml
 
   rust:
     runs-on: docker

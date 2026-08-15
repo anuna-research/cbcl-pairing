@@ -80,6 +80,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 cargo doc --no-deps --all-features
 cargo deny --all-features check
+cargo deny --manifest-path fuzz/Cargo.toml --all-features check
 tools/run-mutations.sh
 tools/run-fuzz-budgets.sh
 ```

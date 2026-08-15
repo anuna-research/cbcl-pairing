@@ -3,13 +3,14 @@ name = "cbcl-pairing-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
+license = "Apache-2.0 OR MIT"
 
 [package.metadata]
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
-cbcl-pairing = { path = ".." }
+libfuzzer-sys = "=0.4.13"
+cbcl-pairing = { path = "..", version = "=0.1.0" }
 
 [[bin]]
 name = "wire_recognition"
