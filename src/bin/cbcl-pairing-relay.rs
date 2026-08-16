@@ -7,7 +7,9 @@
 use cbcl_pairing::{
     limiter::{LimiterConfig, OperationPolicy},
     observability::CapacityCaps,
-    relay::{ConnectionId, RelayConfig, RelayRandomness, RelayService, RoutedMessage},
+    relay::{
+        sample_nameplate, ConnectionId, RelayConfig, RelayRandomness, RelayService, RoutedMessage,
+    },
     storage::FileMailboxStore,
     wire::{decode_client_message, encode_server_message, ServerMessage},
 };
@@ -361,13 +363,17 @@ fn unix_time() -> u64 {
 }
 
 fn random_values() -> Result<RelayRandomness, ()> {
-    let mut bytes = [0_u8; 68];
+    let mut bytes = [0_u8; 64];
     getrandom::fill(&mut bytes).map_err(|_| ())?;
     let mut mailbox_id = [0_u8; 32];
     mailbox_id.copy_from_slice(&bytes[..32]);
     let mut membership_token = [0_u8; 32];
     membership_token.copy_from_slice(&bytes[32..64]);
-    let nameplate = u32::from_be_bytes(bytes[64..68].try_into().map_err(|_| ())?) % 1_000_000_000;
+    let nameplate = sample_nameplate(|| {
+        let mut candidate = [0_u8; 4];
+        getrandom::fill(&mut candidate).map_err(|_| ())?;
+        Ok(u32::from_be_bytes(candidate))
+    })?;
     Ok(RelayRandomness {
         mailbox_id,
         membership_token,

@@ -1,4 +1,8 @@
-//! Official revision-21 CPace255 conformance vectors and lifecycle tests.
+//! CPace draft-21 Appendix B author vectors and local lifecycle tests.
+//!
+//! Source: <https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-cpace-21#appendix-B>
+//! These vectors are authoritative for that draft revision but are not
+//! independently generated cryptographic vectors.
 
 use cbcl_pairing::{
     cpace::{
@@ -27,7 +31,7 @@ fn sid() -> [u8; 16] {
 }
 
 #[test]
-fn official_cpace255_generator_and_exchange_vector() {
+fn draft_21_cpace255_generator_and_exchange_vector() {
     let sid = sid();
     let generator = calculate_generator(PRS, CI, &sid).expect("generator");
     assert_eq!(
@@ -89,7 +93,7 @@ fn generator_string_has_the_pinned_hash_input_layout() {
 }
 
 #[test]
-fn official_low_order_inputs_are_rejected() {
+fn draft_21_low_order_inputs_are_rejected() {
     let scalar = bytes32("af46e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449aff");
     let invalid = [
         "0000000000000000000000000000000000000000000000000000000000000000",
@@ -111,7 +115,7 @@ fn official_low_order_inputs_are_rejected() {
 }
 
 #[test]
-fn official_noncanonical_and_valid_inputs_match() {
+fn draft_21_noncanonical_and_valid_inputs_match() {
     let scalar = bytes32("af46e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449aff");
     let vectors = [
         (

@@ -33,5 +33,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --all-targets --all-features
+      - name: Maximum-message recognition work bound
+        run: cargo test --release --test recognition test_023_maximum_adversarial_wire_message_has_bounded_recognition_work -- --exact
       - name: Required security mutations
         run: tools/run-mutations.sh

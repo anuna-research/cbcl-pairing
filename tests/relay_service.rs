@@ -3,7 +3,10 @@
 use cbcl_pairing::{
     limiter::{LimiterConfig, OperationPolicy},
     observability::{CapacityCaps, RelayOutcome},
-    relay::{ConnectionId, RelayConfig, RelayRandomness, RelayService, RoutedMessage},
+    relay::{
+        sample_nameplate, ConnectionId, RelayConfig, RelayError, RelayRandomness, RelayService,
+        RoutedMessage,
+    },
     wire::{ClientMessage, CloseReason, Locator, ServerMessage},
 };
 
@@ -47,13 +50,7 @@ fn handle(
     message: ClientMessage,
 ) -> Vec<RoutedMessage> {
     relay
-        .handle(
-            ConnectionId(connection),
-            format!("127.0.0.1:{}", 10_000 + connection).as_bytes(),
-            now,
-            random,
-            message,
-        )
+        .handle(ConnectionId(connection), b"127.0.0.1", now, random, message)
         .expect("relay command")
 }
 
@@ -331,4 +328,127 @@ fn test_017_two_isolated_operator_instances_have_identical_protocol_results() {
     let first = operator_transcript([0x11; 32]);
     let second = operator_transcript([0x99; 32]);
     assert_eq!(first, second);
+}
+
+#[test]
+fn test_025_relay_admission_survives_backwards_wall_clock_step() {
+    let mut relay = RelayService::new(config([0x11; 32], false)).expect("service");
+    assert_eq!(relay.metrics().gauges.limiter_clock_reversals, 0);
+    bind(&mut relay, 1, 1_000);
+    assert_eq!(relay.metrics().gauges.limiter_entries, 1);
+    assert_eq!(
+        handle(&mut relay, 1, 970, randomness(0, 0, 0), ClientMessage::Ping,)[0].message,
+        ServerMessage::Pong
+    );
+    assert_eq!(relay.metrics().gauges.limiter_entries, 2);
+    assert_eq!(relay.metrics().gauges.limiter_clock_reversals, 1);
+}
+
+#[test]
+fn test_025_periodic_service_sweep_respects_exact_interval_boundaries() {
+    let mut equality = RelayService::new(config([0x11; 32], false)).expect("service");
+    bind(&mut equality, 1, 1_000);
+    equality.sweep(1_029).expect("pre-interval sweep");
+    equality.sweep(1_059).expect("interval sweep");
+    equality.sweep(1_060).expect("second pre-interval sweep");
+    assert_eq!(equality.metrics().gauges.limiter_entries, 1);
+
+    let mut inclusive = RelayService::new(config([0x22; 32], false)).expect("service");
+    bind(&mut inclusive, 1, 1_000);
+    inclusive.sweep(1_030).expect("exact-interval sweep");
+    inclusive.sweep(1_059).expect("pre-interval sweep");
+    inclusive.sweep(1_060).expect("next exact-interval sweep");
+    assert_eq!(inclusive.metrics().gauges.limiter_entries, 0);
+}
+
+#[test]
+fn relay_configuration_rejects_each_independent_capacity_error() {
+    let mut zero_queue = config([0x11; 32], false);
+    zero_queue.capacity.queue_bytes = 0;
+    assert!(matches!(
+        RelayService::new(zero_queue),
+        Err(RelayError::InvalidConfiguration)
+    ));
+
+    let mut mismatched_limiter = config([0x11; 32], false);
+    mismatched_limiter.capacity.limiter_entries -= 1;
+    assert!(matches!(
+        RelayService::new(mismatched_limiter),
+        Err(RelayError::InvalidConfiguration)
+    ));
+}
+
+#[test]
+fn membership_token_reuse_and_projected_queue_overflow_fail_closed() {
+    let mut relay = RelayService::new(config([0x11; 32], true)).expect("service");
+    bind(&mut relay, 1, 1_000);
+    assert!(matches!(
+        handle(
+            &mut relay,
+            1,
+            1_001,
+            randomness(0x11, 0x33, 0),
+            ClientMessage::Allocate {
+                locator_mode: 0,
+                ttl_seconds: Some(60),
+            },
+        )[0]
+        .message,
+        ServerMessage::Allocated { .. }
+    ));
+    bind(&mut relay, 2, 1_002);
+    assert_eq!(
+        handle(
+            &mut relay,
+            2,
+            1_003,
+            randomness(0x22, 0x33, 0),
+            ClientMessage::Allocate {
+                locator_mode: 0,
+                ttl_seconds: Some(60),
+            },
+        )[0]
+        .message,
+        ServerMessage::Error(503)
+    );
+    assert_eq!(relay.mailbox_count(), 1);
+
+    let mut bounded = config([0x22; 32], true);
+    bounded.capacity.queue_bytes = 1;
+    let mut bounded = RelayService::new(bounded).expect("bounded service");
+    bind(&mut bounded, 1, 2_000);
+    handle(
+        &mut bounded,
+        1,
+        2_001,
+        randomness(0x44, 0x55, 0),
+        ClientMessage::Allocate {
+            locator_mode: 0,
+            ttl_seconds: Some(60),
+        },
+    );
+    assert_eq!(
+        handle(
+            &mut bounded,
+            1,
+            2_002,
+            randomness(0, 0, 0),
+            ClientMessage::Put {
+                seq: 0,
+                body: vec![1, 2],
+            },
+        )[0]
+        .message,
+        ServerMessage::Error(503)
+    );
+    assert_eq!(bounded.metrics().gauges.queue_bytes, 0);
+}
+
+#[test]
+fn test_028_nameplate_sampling_rejects_the_biased_tail() {
+    let mut candidates = [4_000_000_000_u32, 3_999_999_999].into_iter();
+    let sampled = sample_nameplate(|| candidates.next().ok_or("missing candidate"))
+        .expect("second candidate is accepted");
+    assert_eq!(sampled, 999_999_999);
+    assert!(candidates.next().is_none());
 }

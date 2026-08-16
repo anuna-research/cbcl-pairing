@@ -1,6 +1,6 @@
 //! Canonical SPEC-072 wire values and trust-boundary recognisers.
 
-use std::{fmt, io::Cursor, sync::OnceLock};
+use std::{collections::BTreeSet, fmt, io::Cursor, sync::OnceLock};
 
 use cddl_cat::{cbor::validate_cbor, context::BasicContext, flatten::flatten_from_str};
 use ciborium::Value;
@@ -302,14 +302,13 @@ fn has_duplicate_key(value: &Value) -> Result<bool, RecognitionError> {
             }
         }
         Value::Map(entries) => {
-            let mut keys = Vec::with_capacity(entries.len());
+            let mut keys = BTreeSet::new();
             for (key, item) in entries {
                 let canonical_key =
                     cbor2::to_canonical_vec(key).map_err(|_| RecognitionError::NonDeterministic)?;
-                if keys.contains(&canonical_key) {
+                if !keys.insert(canonical_key) {
                     return Ok(true);
                 }
-                keys.push(canonical_key);
                 if has_duplicate_key(key)? || has_duplicate_key(item)? {
                     return Ok(true);
                 }
@@ -328,13 +327,14 @@ fn recognise_value(input: &[u8], rule: &str) -> Result<Value, RecognitionError> 
     if cursor.position() != input.len() as u64 {
         return Err(RecognitionError::TrailingBytes);
     }
+    match cbor2::to_canonical_vec(&value) {
+        Ok(canonical) if canonical != input => return Err(RecognitionError::NonDeterministic),
+        Ok(_) => {}
+        Err(_) if has_duplicate_key(&value)? => return Err(RecognitionError::DuplicateKey),
+        Err(_) => return Err(RecognitionError::NonDeterministic),
+    }
     if has_duplicate_key(&value)? {
         return Err(RecognitionError::DuplicateKey);
-    }
-    let canonical =
-        cbor2::to_canonical_vec(&value).map_err(|_| RecognitionError::NonDeterministic)?;
-    if canonical != input {
-        return Err(RecognitionError::NonDeterministic);
     }
 
     let context = cddl_context()?;

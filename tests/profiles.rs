@@ -184,7 +184,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/src/bin/cbcl-pairing-relay.rs"
             ))
             .as_slice(),
-            "19daf1d84007e02606070539494e9a75984baaacfe598646906b5468d68b2e1d",
+            "c711f24f19f2e76da03493e478274cfdc50a9431c53520056e0fb42ff8951562",
         ),
         (
             include_bytes!(concat!(
@@ -192,7 +192,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/src/bin/cbcl-pairing-relay-ws.rs"
             ))
             .as_slice(),
-            "58d113d4811c710c219d939e8f6cdcb1ab9ef72d98f2ee4fb0e80213182736bf",
+            "9fbcf0fe4d2281f4a7c147080996045033204a74fe5b5e79bc9a6f7e69416ed0",
         ),
         (
             include_bytes!(concat!(
@@ -204,7 +204,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/mailbox.rs")).as_slice(),
-            "b385a9edb0ec1a34f1930daf94ffec977be78feb61887c31856e22d18c05da07",
+            "5df5fdca0c9105140e5ab20a7155b3db56030738b1b0a3d60a5ba77d8ee969f6",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/storage.rs")).as_slice(),
@@ -212,15 +212,15 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/relay.rs")).as_slice(),
-            "2acefa153b79a983bcacbdc6992fa854d162833e14e7809606d0aeba68d0d972",
+            "fd2956de38791f96660615feccba0d0287da1eebf3bbda1a8c74a4600d3af834",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/limiter.rs")).as_slice(),
-            "ace64e6c89d745b305af0c5dca42c5e90ab2643ce0ae0f009d66c41ce68e59ca",
+            "0ababe90ba3040f6fd66dbefc9041d23e040e872b1f007e60d4aa3ba596b3d47",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/observability.rs")).as_slice(),
-            "5c357c35c3a781b39ed1848fa9c6ab34dd3eb2c282a3114be9d9e7825e4b0ed8",
+            "892fd61c0a8d1cc3cbf24f0633f5a8dcbb32ea7f82a5363cd8daf1fb9b8bd177",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).as_slice(),
@@ -232,7 +232,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/.forgejo/workflows/ci.yml"
             ))
             .as_slice(),
-            "ff2e799e83cf488a1dd5f355713638c195fa79790883b74c5a679e4666b1b6ac",
+            "2cdc6d8b11b9258e843b826e7836fa906f7f6b77a880e14bdec1cf73a23f016d",
         ),
     ] {
         assert_eq!(hex::encode(Sha256::digest(bytes)), expected);

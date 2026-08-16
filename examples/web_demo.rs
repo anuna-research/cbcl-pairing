@@ -13,6 +13,7 @@ use cbcl_pairing::{
         AgentGrant, AgentIntentClaims, AgentProfile, AgentWordPair, DisplayIntent, GrantVerifier,
         ProfileError, RecognisedPayload, AGENT_ACTION, AGENT_APPLICATION, AGENT_PAYLOAD,
     },
+    relay::sample_nameplate,
     wire::{
         encode_channel_frame, encode_cpace_message, encode_invitation, ApplicationPayload,
         ChannelFrame, Decision, Invitation, Locator, PairingIntent, Side,
@@ -57,7 +58,7 @@ impl DemoInvitation {
         let mailbox_id = random_array::<32>()?;
         let word_pair = AgentWordPair::from_csprng_octets(random_array::<3>()?);
         let words = word_pair.words();
-        let nameplate = u32::from_be_bytes(random_array::<4>()?) % 1_000_000_000;
+        let nameplate = sample_nameplate(|| random_array::<4>().map(u32::from_be_bytes))?;
         Ok(Self {
             mailbox_id,
             invitation: Invitation {

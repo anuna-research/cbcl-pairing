@@ -4,12 +4,12 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.1.0
+version: 0.2.0
 last-updated: 2026-08-16
 owner-repo: cbcl-pairing
 implementation-status: local-complete
-implementation-baseline: 4f7b18644991cae974bb3aaa49d296182ea63918
-documentation-baseline: 36ac1344d094c585b7ada2dce00763eeecb6b670
+implementation-baseline: b2a9df8166bf92be8e2207f84830e03c9db9f750
+documentation-baseline: b2a9df8166bf92be8e2207f84830e03c9db9f750
 derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574edc8
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
@@ -73,6 +73,10 @@ authority after review.
 - [[SPEC-001-reusable-blind-pairing#REQ-013]] consumes an invitation before the
   first online guess.
 - [[SPEC-001-reusable-blind-pairing#REQ-015]] gates effects on CBCL verdicts.
+- [[SPEC-001-reusable-blind-pairing#NFR-009]] bounds recognition work at the
+  anonymous trust boundary.
+- [[SPEC-001-reusable-blind-pairing#NFR-010]] prevents queued state from
+  amplifying unrelated relay operations.
 
 **Controls.**
 
@@ -97,6 +101,12 @@ authority after review.
   [[SPEC-001-reusable-blind-pairing#NFR-004]].
 - Mailbox lifetime remains 60–600 seconds under
   [[SPEC-001-reusable-blind-pairing#NFR-005]].
+- A maximum-size wire message completes recognition within 100 milliseconds
+  under [[SPEC-001-reusable-blind-pairing#NFR-009]].
+- A backwards wall-clock step SHALL NOT refuse admission under
+  [[SPEC-001-reusable-blind-pairing#NFR-011]].
+- Limiter diversity SHALL NOT refuse a new peer solely at the entry cap under
+  [[SPEC-001-reusable-blind-pairing#NFR-012]].
 - Acknowledgement and terminal closure delete bodies immediately under
   [[SPEC-001-reusable-blind-pairing#NFR-003]].
 - Recovery after a terminal result always creates a fresh invitation.
@@ -116,10 +126,9 @@ The source specification supplies intent, requirements, threat analysis, and
 production holds. Local code supplies implementation evidence only. No clause
 in this document was inferred solely from observed code behaviour.
 
-The implementation baseline is `cbcl-pairing` commit
-`4f7b18644991cae974bb3aaa49d296182ea63918`. Commit
-`36ac1344d094c585b7ada2dce00763eeecb6b670` adds architecture and flow
-documentation without protocol changes.
+The implementation and documentation baseline is `cbcl-pairing` commit
+`b2a9df8166bf92be8e2207f84830e03c9db9f750`. Version 0.2.0 measures its
+review remediation against that parent until the resulting change is merged.
 
 Until this draft passes stakeholder validation, source SPEC-072 remains the
 design authority and this document is its candidate repository-local
@@ -238,6 +247,12 @@ Two conflicting sibling decisions each pass generic causal checks.
 ### FM-013: Cross-repository specifications drift
 
 A cross-repository source spec and local implementation drift silently.
+
+### FM-014: Bounded storage is mistaken for bounded work
+
+An anonymous request forces work or allocation proportional to unrelated
+retained state. A bounded store can still amplify cheap requests into process
+wide CPU, memory, or admission failure.
 
 ## Requirements
 
@@ -534,6 +549,62 @@ Trace:
 - [[SPEC-001-reusable-blind-pairing#CON-010]]
 - [[SPEC-001-reusable-blind-pairing#TEST-020]]
 
+### NFR-009: Wire recognition work is bounded
+
+Recognition SHALL have `O(n log n)` worst-case work for an `n`-octet wire
+message. A 69,729-octet adversarial message SHALL finish within 100
+milliseconds in the release test profile.
+
+The timing gate warms the recogniser once and measures one single-threaded
+decode with `Instant`. Wall time is a conservative bound on CPU consumption.
+
+Addresses [[SPEC-001-reusable-blind-pairing#FM-014]].
+
+Trace:
+- [[SPEC-001-reusable-blind-pairing#CON-002]]
+- [[SPEC-001-reusable-blind-pairing#TEST-023]]
+- [[SPEC-001-reusable-blind-pairing#OBS-001]]
+
+### NFR-010: Relay work is independent of unrelated queued state
+
+A relay operation SHALL NOT scan or clone bodies outside its addressed
+mailbox. A no-expiry sweep SHALL inspect only the earliest expiry index entry.
+
+Addresses [[SPEC-001-reusable-blind-pairing#FM-014]].
+
+Trace:
+- [[SPEC-001-reusable-blind-pairing#CON-003]]
+- [[SPEC-001-reusable-blind-pairing#TEST-024]]
+- [[SPEC-001-reusable-blind-pairing#OBS-002]]
+
+### NFR-011: Backwards clock steps preserve admission
+
+The limiter SHALL clamp a backwards wall-clock observation to its latest
+observed second. The bounded step SHALL NOT produce an unavailable response.
+
+The reference test uses a 30-second backwards step. Cooldown and window time
+remain pinned until wall time reaches the previous high-water mark.
+
+Addresses [[SPEC-001-reusable-blind-pairing#FM-014]].
+
+Trace:
+- [[SPEC-001-reusable-blind-pairing#CON-008]]
+- [[SPEC-001-reusable-blind-pairing#TEST-025]]
+- [[SPEC-001-reusable-blind-pairing#OBS-002]]
+
+### NFR-012: Peer diversity preserves limiter admission
+
+One IPv6 `/64` SHALL consume at most one peer dimension per operation.
+Reaching the entry cap SHALL evict the least-recently-used dimension before
+admitting a new peer dimension.
+
+Addresses [[SPEC-001-reusable-blind-pairing#FM-014]].
+
+Trace:
+- [[SPEC-001-reusable-blind-pairing#CON-008]]
+- [[SPEC-001-reusable-blind-pairing#TEST-026]]
+- [[SPEC-001-reusable-blind-pairing#OBS-002]]
+
 ## Architecture decisions
 
 ### ADR-001: The relay is application-unaware
@@ -589,6 +660,22 @@ candidate local restatement. After this document is approved, SPEC-072 remains
 provenance, this SPEC-001 governs changes within `cbcl-pairing`, and
 compatibility changes require explicit cross-repository reconciliation.
 
+### ADR-011: Relay work uses indexes and incremental accounting
+
+The standard library supplies ordered sets and maps for every new index.
+The relay maintains queued-byte, membership, expiry, and limiter-recency
+indexes beside their owning state.
+
+Persistence snapshots remain complete and body-bearing. Internal admission,
+gauge, lookup, and sweep paths use non-cloning accessors and indexes.
+
+This placement keeps mailbox transitions and limiter decisions in the pure
+core. The effectful relay shell owns only aggregate indexes over stored cores.
+
+Alternative full-state scans preserve one representation but violate
+[[SPEC-001-reusable-blind-pairing#NFR-010]]. A new cache dependency adds no
+required capability beyond `BTreeMap` and `BTreeSet`.
+
 ## Contracts
 
 ### CON-001: Invitation and carrier boundary
@@ -606,6 +693,7 @@ information, fragment, or non-root path.
 
 Locator mode 0 carries a 32-octet mailbox identifier. Locator mode 1 carries a
 numeric nameplate in `0..999999999`. A nameplate contributes no secret entropy.
+The reference shell rejection-samples a uniform value from this exact range.
 
 The invitation never enters the relay as one object. Carrier decoding yields
 exact PRS octets without normalization or case folding.
@@ -615,14 +703,16 @@ Implements:
 
 Verified by:
 - [[SPEC-001-reusable-blind-pairing#TEST-005]]
+- [[SPEC-001-reusable-blind-pairing#TEST-028]]
 
 ### CON-002: Blind mailbox wire protocol
 
 The exact client and server grammar is `schemas/pairing-v1.cddl`. The wire uses
 RFC 8949 deterministic CBOR.
 
-Full recognition rejects unknown keys, duplicate keys, non-deterministic
-encoding, trailing octets, and out-of-range values before state effects.
+Full recognition parses one complete value and rejects trailing octets. It
+then rejects non-deterministic encoding before scanning canonical keys in an
+ordered set. Schema and typed projection follow without state effects.
 
 Each connection sends `bind` first. Allocation creates a CSPRNG mailbox
 identifier and membership token. The relay stores only the token's SHA-256
@@ -657,6 +747,9 @@ terminal <---------------- third claim ------------ crowded
 Each membership owns a contiguous sequence from zero. The next sequence stores
 and routes the frame. An identical retry is idempotent.
 
+The relay generates each claimant token once. A token-hash collision returns
+conflict and never becomes a successful repeated claim.
+
 A sequence gap returns conflict without storage. A different body at an
 existing sequence closes the mailbox as conflict.
 
@@ -668,18 +761,25 @@ The included memory and file stores retain only blind `MailboxSnapshot` state.
 The file store uses private permissions, canonical records, fsync, and atomic
 rename. Restart removes interrupted temporary body records.
 
+The relay maintains queued bytes incrementally. It indexes membership hashes
+and absolute expiries without copying queued bodies. Persistence alone uses
+the complete snapshot representation.
+
 Implements:
 - [[SPEC-001-reusable-blind-pairing#REQ-004]]
 - [[SPEC-001-reusable-blind-pairing#REQ-005]]
 - [[SPEC-001-reusable-blind-pairing#NFR-002]]
 - [[SPEC-001-reusable-blind-pairing#NFR-003]]
 - [[SPEC-001-reusable-blind-pairing#NFR-006]]
+- [[SPEC-001-reusable-blind-pairing#NFR-010]]
 
 Verified by:
 - [[SPEC-001-reusable-blind-pairing#TEST-001]]
 - [[SPEC-001-reusable-blind-pairing#TEST-003]]
 - [[SPEC-001-reusable-blind-pairing#TEST-004]]
 - [[SPEC-001-reusable-blind-pairing#TEST-013]]
+- [[SPEC-001-reusable-blind-pairing#TEST-024]]
+- [[SPEC-001-reusable-blind-pairing#TEST-029]]
 
 ### CON-004: CPace pairing channel
 
@@ -837,8 +937,8 @@ Verified by:
 ### CON-008: Abuse control, storage, and logging
 
 The limiter dimension is `{operation, PeerKey}`. `PeerKey` equals
-HMAC-SHA-256 over canonical peer-address bytes with a private 32-octet operator
-key.
+HMAC-SHA-256 over a family tag and one canonical address prefix. IPv4 uses
+`/32`, IPv4-mapped IPv6 uses its IPv4 `/32`, and other IPv6 uses `/64`.
 
 The operator key never authenticates peers, derives channel keys, encrypts
 mailboxes, or opens invitations. Each operator uses an independent key.
@@ -846,8 +946,15 @@ mailboxes, or opens invitations. Each operator uses an independent key.
 The reference policy permits 240 attempts per operation in 60 seconds. Exceeding
 the budget starts a 300-second cooldown.
 
-The limiter holds at most 100,000 dimensions. The relay holds at most 10,000
-open mailboxes and 512 MiB of queued opaque bodies.
+The limiter holds at most 100,000 dimensions. At capacity, it evicts the
+least-recently-used dimension before inserting a new one. It never refuses a
+new peer solely because this cap is full.
+
+The limiter clamps backwards time to its process-local high-water mark. It
+records an aggregate reversal count and never extends stored mailbox expiry.
+
+The relay holds at most 10,000 open mailboxes and 512 MiB of queued opaque
+bodies.
 
 Logs contain only closed operation and outcome labels. Metrics contain closed
 counters and aggregate gauges.
@@ -859,11 +966,15 @@ Implements:
 - [[SPEC-001-reusable-blind-pairing#REQ-006]]
 - [[SPEC-001-reusable-blind-pairing#REQ-012]]
 - [[SPEC-001-reusable-blind-pairing#NFR-003]]
+- [[SPEC-001-reusable-blind-pairing#NFR-011]]
+- [[SPEC-001-reusable-blind-pairing#NFR-012]]
 
 Verified by:
 - [[SPEC-001-reusable-blind-pairing#TEST-013]]
 - [[SPEC-001-reusable-blind-pairing#TEST-014]]
 - [[SPEC-001-reusable-blind-pairing#TEST-015]]
+- [[SPEC-001-reusable-blind-pairing#TEST-025]]
+- [[SPEC-001-reusable-blind-pairing#TEST-026]]
 
 ### CON-009: Implementation-neutral endpoint boundary
 
@@ -974,7 +1085,8 @@ contains no peer, locator, mailbox, application, or payload value.
 ### OBS-002: Relay bounded-state signals
 
 Aggregate gauges expose open mailboxes, queued bytes, and limiter entries.
-They contain no per-peer or per-mailbox label.
+An aggregate counter exposes backwards limiter-clock observations. These
+signals contain no per-peer or per-mailbox label.
 
 ### OBS-003: Endpoint pairing outcomes
 
@@ -1170,6 +1282,8 @@ the complete authenticated fan-in opens the session cast.
 Validates: [[SPEC-001-reusable-blind-pairing#REQ-015]].
 Evidence: `tests/cbcl_protocol.rs`, `tests/endpoint.rs`.
 
+### Review-remediation core tests
+
 #### TEST-022: Conflicting decisions release no payload
 
 Present both sibling decisions and reordered decision controls. Verify atomic
@@ -1178,6 +1292,72 @@ first-decision behaviour, terminal conflict, and no grant after decline.
 Validates: [[SPEC-001-reusable-blind-pairing#REQ-009]],
 [[SPEC-001-reusable-blind-pairing#REQ-015]].
 Evidence: `tests/cbcl_protocol.rs`, `tests/endpoint.rs`.
+
+#### TEST-023: Maximum wire recognition has bounded work
+
+Warm the recogniser with one valid message. Decode a 69,729-octet reverse-key
+map and require deterministic-encoding rejection.
+
+Under the release profile, require completion within 100 milliseconds. Decode
+a canonical duplicate-key input and require duplicate rejection.
+
+Validates: [[SPEC-001-reusable-blind-pairing#NFR-009]].
+Evidence: `tests/recognition.rs`.
+
+#### TEST-024: Unrelated queued bodies do not amplify relay work
+
+Load 200 mailboxes containing at least 200 MiB of queued opaque bodies. Track
+allocations while processing Ping and a no-expiry sweep.
+
+Require both operations to allocate less than 64 KiB. Require gauges and body
+bytes to remain unchanged.
+
+Validates: [[SPEC-001-reusable-blind-pairing#NFR-010]].
+Evidence: `tests/relay_work_bounds.rs`.
+
+#### TEST-025: A backwards clock step does not brick admission
+
+Admit one operation at time 1,000. Submit another at time 970 and require a
+normal limiter decision with one recorded reversal.
+
+Repeat through `RelayService` and require a protocol response other than 503.
+
+Validates: [[SPEC-001-reusable-blind-pairing#NFR-011]].
+Evidence: `tests/limiter_observability.rs`, `tests/relay_service.rs`.
+
+#### TEST-026: Limiter diversity remains bounded without shared refusal
+
+Submit distinct IPv6 addresses from one `/64` and require one peer dimension
+per operation. Fill a small limiter, refresh one entry, and add another peer.
+
+Require fixed entry count, least-recently-used eviction, and allowed admission.
+
+Validates: [[SPEC-001-reusable-blind-pairing#NFR-012]].
+Evidence: `tests/limiter_observability.rs`.
+
+#### TEST-027: WebSocket oversize input returns the contract error
+
+Send one 70,001-octet binary WebSocket message. Require a canonical
+`Error(413)` response before the relay closes that connection.
+
+Validates: [[SPEC-001-reusable-blind-pairing#CON-002]].
+Evidence: `tests/websocket_process.rs`.
+
+#### TEST-028: Nameplate sampling has no modulo bias
+
+Supply `4,000,000,000` followed by `3,999,999,999` to the sampler. Require
+rejection of the first value and output `999,999,999` from the second.
+
+Validates: [[SPEC-001-reusable-blind-pairing#CON-001]].
+Evidence: `tests/relay_service.rs`, `examples/web_demo.rs`.
+
+#### TEST-029: Claimant-token collision cannot re-claim
+
+Submit an allocator hash and then an existing claimant hash as a new claim.
+Require conflict without a `Claimed` effect or state change.
+
+Validates: [[SPEC-001-reusable-blind-pairing#CON-003]].
+Evidence: `tests/mailbox.rs`, `tests/relay_service.rs`.
 
 ### Assurance gates
 
@@ -1320,7 +1500,11 @@ Hard stops: [[SPEC-001-reusable-blind-pairing#REQ-002]],
 [[SPEC-001-reusable-blind-pairing#REQ-009]],
 [[SPEC-001-reusable-blind-pairing#REQ-013]],
 [[SPEC-001-reusable-blind-pairing#REQ-014]],
-[[SPEC-001-reusable-blind-pairing#REQ-015]], and every item under
+[[SPEC-001-reusable-blind-pairing#REQ-015]],
+[[SPEC-001-reusable-blind-pairing#NFR-009]],
+[[SPEC-001-reusable-blind-pairing#NFR-010]],
+[[SPEC-001-reusable-blind-pairing#NFR-011]],
+[[SPEC-001-reusable-blind-pairing#NFR-012]], and every item under
 [[SPEC-001-reusable-blind-pairing#Production gates]].
 
 No channel can waive a hard stop without a new specification version and the
@@ -1330,7 +1514,12 @@ required Tier-1 review.
 
 - The protocol does not hide timing, size, or network-address metadata from the
   selected relay operator.
-- A malicious relay can deny service, delay delivery, or crowd an invitation.
+- A malicious operator can deny service, delay delivery, or crowd an
+  invitation. Anonymous-client work amplification violates
+  [[SPEC-001-reusable-blind-pairing#NFR-009]],
+  [[SPEC-001-reusable-blind-pairing#NFR-010]],
+  [[SPEC-001-reusable-blind-pairing#NFR-011]], or
+  [[SPEC-001-reusable-blind-pairing#NFR-012]].
 - Version 1 does not claim post-quantum security.
 - Version 1 does not define an attribute authority, revocation system, or
   general authorization policy.
@@ -1341,7 +1530,11 @@ required Tier-1 review.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0</summary>
+<summary>Revision history — 0.1.0 → 0.2.0</summary>
+
+- 0.2.0 — added work-amplification failure analysis, performance limits,
+  indexed relay accounting, clock clamping, limiter diversity handling, and
+  review-drift corrections.
 
 - 0.1.0 — created the repository-local specification from SPEC-072 v0.3.4,
   exact local protocol assets, completed implementation evidence, and retained

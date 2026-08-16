@@ -8,6 +8,7 @@ use cbcl_pairing::wire::{
     RecognitionError,
 };
 use ciborium::Value;
+use std::time::{Duration, Instant};
 
 fn text(value: &str) -> Value {
     Value::Text(value.into())
@@ -234,6 +235,19 @@ fn test_005_rejects_unknown_and_duplicate_keys_for_every_client_command() {
             Err(RecognitionError::DuplicateKey)
         );
     }
+
+    let tagged_duplicate = Value::Tag(
+        42,
+        Box::new(Value::Map(vec![
+            (text("nested"), uint(0)),
+            (text("nested"), uint(1)),
+        ])),
+    );
+    let nested = map(vec![("type", text("ping")), ("unknown", tagged_duplicate)]);
+    assert_eq!(
+        decode_client_message(&encode_permissive(&nested)),
+        Err(RecognitionError::DuplicateKey)
+    );
 }
 
 #[test]
@@ -256,6 +270,37 @@ fn test_005_rejects_non_deterministic_and_trailing_cbor() {
         decode_client_message(&[0xff]),
         Err(RecognitionError::MalformedCbor)
     );
+}
+
+#[test]
+fn test_023_maximum_adversarial_wire_message_has_bounded_recognition_work() {
+    let warmup = encode(&map(vec![("type", text("ping"))]));
+    assert_eq!(
+        decode_client_message(&warmup),
+        Ok(cbcl_pairing::wire::ClientMessage::Ping)
+    );
+
+    let reverse_keys = Value::Map(
+        (0_u32..11_621)
+            .rev()
+            .map(|key| (Value::Bytes(key.to_be_bytes().to_vec()), uint(0)))
+            .collect(),
+    );
+    let input = encode_permissive(&reverse_keys);
+    assert_eq!(input.len(), 69_729);
+
+    let started = Instant::now();
+    assert_eq!(
+        decode_client_message(&input),
+        Err(RecognitionError::NonDeterministic)
+    );
+    let elapsed = started.elapsed();
+    if !cfg!(debug_assertions) {
+        assert!(
+            elapsed <= Duration::from_millis(100),
+            "69,729-byte recognition took {elapsed:?}"
+        );
+    }
 }
 
 #[test]

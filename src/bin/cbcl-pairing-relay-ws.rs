@@ -7,7 +7,9 @@
 use cbcl_pairing::{
     limiter::{LimiterConfig, OperationPolicy},
     observability::CapacityCaps,
-    relay::{ConnectionId, RelayConfig, RelayRandomness, RelayService, RoutedMessage},
+    relay::{
+        sample_nameplate, ConnectionId, RelayConfig, RelayRandomness, RelayService, RoutedMessage,
+    },
     storage::FileMailboxStore,
     wire::{decode_client_message, encode_server_message, ServerMessage},
 };
@@ -156,16 +158,6 @@ fn serve_connection(
         }
         match websocket.read() {
             Ok(Message::Binary(bytes)) => {
-                if bytes.len() > MAX_WIRE_MESSAGE {
-                    dispatch(
-                        &senders,
-                        vec![RoutedMessage {
-                            connection,
-                            message: ServerMessage::Error(413),
-                        }],
-                    );
-                    continue;
-                }
                 let message = match decode_client_message(&bytes) {
                     Ok(message) => message,
                     Err(_) => {
@@ -231,6 +223,14 @@ fn serve_connection(
                     error.kind(),
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                 ) => {}
+            Err(tungstenite::Error::Capacity(
+                tungstenite::error::CapacityError::MessageTooLong { .. },
+            )) => {
+                if let Ok(bytes) = encode_server_message(&ServerMessage::Error(413)) {
+                    let _ = websocket.send(Message::Binary(bytes.into()));
+                }
+                break;
+            }
             Err(_) => break,
         }
     }
@@ -354,12 +354,17 @@ fn hex_nibble(value: u8) -> Result<u8, String> {
 }
 
 fn random_values() -> Result<RelayRandomness, ()> {
-    let mut bytes = [0_u8; 68];
+    let mut bytes = [0_u8; 64];
     getrandom::fill(&mut bytes).map_err(|_| ())?;
+    let nameplate = sample_nameplate(|| {
+        let mut candidate = [0_u8; 4];
+        getrandom::fill(&mut candidate).map_err(|_| ())?;
+        Ok(u32::from_be_bytes(candidate))
+    })?;
     Ok(RelayRandomness {
         mailbox_id: bytes[..32].try_into().map_err(|_| ())?,
         membership_token: bytes[32..64].try_into().map_err(|_| ())?,
-        nameplate: u32::from_be_bytes(bytes[64..68].try_into().map_err(|_| ())?) % 1_000_000_000,
+        nameplate,
     })
 }
 
