@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>cbcl-pairing demo</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">cbcl-pairing · agent profile</p>
+        <h1>A private introduction,<br>through a blind relay.</h1>
+        <p class="lede">
+          Run one real pairing ceremony. The endpoints authenticate a two-word
+          invitation, reveal an exact intent to the person, then release a grant
+          only after approval.
+        </p>
+      </div>
+      <div class="status-cluster">
+        <span class="badge">Experimental</span>
+        <span id="headline" class="headline">Ready to create an invitation</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="actions" aria-label="Demo controls">
+        <button id="start" class="primary" type="button">Create invitation</button>
+        <button id="reset" class="quiet" type="button">Reset</button>
+        <span id="busy" class="busy" role="status" aria-live="polite"></span>
+      </section>
+
+      <section class="system" aria-label="Pairing participants">
+        <article class="panel endpoint allocator">
+          <div class="panel-heading">
+            <span class="role">Allocator</span>
+            <span id="allocator-state" class="state">waiting</span>
+          </div>
+          <h2>Research workspace</h2>
+          <p class="muted">Creates a one-time invitation and offers one agent grant.</p>
+          <div id="carrier" class="empty">No invitation yet.</div>
+        </article>
+
+        <article class="panel relay">
+          <div class="panel-heading">
+            <span class="role">Blind relay</span>
+            <span class="state safe">untrusted</span>
+          </div>
+          <h2><span id="relay-frames">0</span> opaque frames</h2>
+          <p class="metric"><span id="relay-bytes">0</span> bytes transported</p>
+          <div class="relay-grid">
+            <div>
+              <h3>Can observe</h3>
+              <ul id="relay-sees"></ul>
+            </div>
+            <div>
+              <h3>Cannot read</h3>
+              <ul id="relay-cannot-see" class="protected"></ul>
+            </div>
+          </div>
+          <p id="relay-note" class="fine-print"></p>
+        </article>
+
+        <article class="panel endpoint claimant">
+          <div class="panel-heading">
+            <span class="role">Claimant</span>
+            <span id="claimant-state" class="state">waiting</span>
+          </div>
+          <h2>Person approving</h2>
+          <p class="muted">Sees intent only after CPace and both Finished values verify.</p>
+          <div id="intent" class="empty">Authenticated intent will appear here.</div>
+          <div id="decision-controls" class="decision-controls" hidden>
+            <button id="approve" class="approve" type="button">Approve once</button>
+            <button id="decline" class="decline" type="button">Decline</button>
+          </div>
+        </article>
+      </section>
+
+      <section id="outcome" class="outcome" aria-live="polite" hidden></section>
+
+      <section class="trace">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Endpoint-side instrumentation</p>
+            <h2>Ceremony trace</h2>
+          </div>
+          <p>The labels explain the demo. The relay sees only the byte counts.</p>
+        </div>
+        <ol id="timeline" class="timeline">
+          <li class="empty-row">Create an invitation to begin.</li>
+        </ol>
+      </section>
+
+      <aside class="notice">
+        <strong>Demo boundary.</strong>
+        Both endpoints and relay instrumentation run in one loopback Rust
+        process. This exercises the real protocol core but is not a deployment,
+        production UI, or cryptographic approval.
+      </aside>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

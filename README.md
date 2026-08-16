@@ -228,8 +228,26 @@ transport can carry the same canonical channel frames themselves.
   application-unaware, bounded relay primitives plus reference TCP and
   WebSocket processes.
 - `dialects`, `schemas`, and `vectors`: pinned interoperable protocol assets.
+- `examples/web_demo.rs` and `examples/web-demo`: a loopback browser demo that
+  runs the real agent-profile ceremony in one Rust process.
 - `evidence`: dated red/green conformance records. These are not substitutes
   for the outstanding independent reviews.
+
+## Browser demo
+
+Run the loopback-only web example, then open `http://127.0.0.1:8088`:
+
+```sh
+cargo run --features relay --example web-demo
+```
+
+The page creates a fresh two-word agent invitation with OS randomness. It runs
+the real CPace exchange, both Finished checks, authenticated CBCL role cast,
+intent recognition, approval or decline, and application grant verification.
+
+Both endpoints and relay instrumentation live in the same demo process. The
+relay panel reports only opaque frame sizes and explains its actual visibility;
+it does not start an independent relay deployment, TLS, or production flow.
 
 ## Build and verify
 

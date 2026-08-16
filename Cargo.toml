@@ -48,3 +48,8 @@ required-features = ["relay"]
 name = "cbcl-pairing-relay-ws"
 path = "src/bin/cbcl-pairing-relay-ws.rs"
 required-features = ["relay"]
+
+[[example]]
+name = "web-demo"
+path = "examples/web_demo.rs"
+required-features = ["relay"]
