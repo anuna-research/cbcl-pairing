@@ -31,6 +31,53 @@
         <span id="busy" class="busy" role="status" aria-live="polite"></span>
       </section>
 
+      <section class="ceremony" aria-labelledby="ceremony-title">
+        <div class="section-heading ceremony-heading">
+          <div>
+            <p class="eyebrow">One guarded path</p>
+            <h2 id="ceremony-title">Ceremony at a glance</h2>
+          </div>
+          <p>Each gate opens the next. A decline stops before the payload.</p>
+        </div>
+        <ol id="ceremony-phases" class="phase-rail">
+          <li data-phase="invitation" data-state="current">
+            <span class="phase-index">01</span>
+            <div><strong>Invitation</strong><small>Out of band</small></div>
+            <span class="phase-status">current</span>
+          </li>
+          <li data-phase="pake" data-state="locked">
+            <span class="phase-index">02</span>
+            <div><strong>CPace</strong><small>Prove the words</small></div>
+            <span class="phase-status">locked</span>
+          </li>
+          <li data-phase="finished" data-state="locked">
+            <span class="phase-index">03</span>
+            <div><strong>Finished</strong><small>Verify both keys</small></div>
+            <span class="phase-status">locked</span>
+          </li>
+          <li data-phase="roles" data-state="locked">
+            <span class="phase-index">04</span>
+            <div><strong>Roles</strong><small>Project CBCL</small></div>
+            <span class="phase-status">locked</span>
+          </li>
+          <li data-phase="intent" data-state="locked">
+            <span class="phase-index">05</span>
+            <div><strong>Intent</strong><small>Recognise exactly</small></div>
+            <span class="phase-status">locked</span>
+          </li>
+          <li data-phase="consent" data-state="locked">
+            <span class="phase-index">06</span>
+            <div><strong>Consent</strong><small>Approve or decline</small></div>
+            <span class="phase-status">locked</span>
+          </li>
+          <li data-phase="grant" data-state="locked">
+            <span class="phase-index">07</span>
+            <div><strong>Grant</strong><small>Verify one payload</small></div>
+            <span class="phase-status">locked</span>
+          </li>
+        </ol>
+      </section>
+
       <section class="system" aria-label="Pairing participants">
         <article class="panel endpoint allocator">
           <div class="panel-heading">
@@ -83,9 +130,20 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Endpoint-side instrumentation</p>
-            <h2>Ceremony trace</h2>
+            <h2>Frames crossing the relay</h2>
           </div>
-          <p>The labels explain the demo. The relay sees only the byte counts.</p>
+          <p>Endpoint labels explain each frame. The dark centre sees its size, not its meaning.</p>
+        </div>
+        <div class="lane-legend" aria-hidden="true">
+          <span class="legend-spacer"></span>
+          <div class="route-legend">
+            <strong>Allocator</strong>
+            <span></span>
+            <strong>Blind relay</strong>
+            <span></span>
+            <strong>Claimant</strong>
+          </div>
+          <small>Relay view</small>
         </div>
         <ol id="timeline" class="timeline">
           <li class="empty-row">Create an invitation to begin.</li>

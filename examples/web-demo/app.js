@@ -15,6 +15,7 @@ const elements = {
   relaySees: document.querySelector("#relay-sees"),
   relayCannotSee: document.querySelector("#relay-cannot-see"),
   relayNote: document.querySelector("#relay-note"),
+  phases: Array.from(document.querySelectorAll("#ceremony-phases li")),
   timeline: document.querySelector("#timeline"),
   outcome: document.querySelector("#outcome"),
 };
@@ -60,6 +61,7 @@ function render(state) {
 
   renderCarrier(state.carrier);
   renderIntent(state.intent);
+  renderPhases(state.stage);
   renderTimeline(state.timeline);
   renderOutcome(state.outcome);
 
@@ -115,16 +117,91 @@ function renderTimeline(timeline) {
     elements.timeline.innerHTML = '<li class="empty-row">Create an invitation to begin.</li>';
     return;
   }
-  elements.timeline.innerHTML = timeline.map((event, index) => `
-    <li>
-      <span class="step">${String(index + 1).padStart(2, "0")}</span>
-      <div class="event">
-        <strong>${escapeHtml(event.label)}</strong>
-        <span>${escapeHtml(event.from)} → ${escapeHtml(event.to)}</span>
+  elements.timeline.innerHTML = timeline.map((event, index) => {
+    const direction = event.from === "Allocator" ? "forward" : "reverse";
+    return `
+    <li class="message-step ${direction}">
+      <div class="message-meta">
+        <span class="step">${String(index + 1).padStart(2, "0")}</span>
+        <div>
+          <strong>${escapeHtml(event.label)}</strong>
+          <span>${escapeHtml(event.from)} → ${escapeHtml(event.to)}</span>
+        </div>
       </div>
-      <code>${escapeHtml(event.relayView)}</code>
+      <div class="message-route" role="img" aria-label="${escapeHtml(event.from)} sends ${escapeHtml(event.label)} through the blind relay to ${escapeHtml(event.to)}">
+        <span class="route-node allocator-node" aria-hidden="true">A</span>
+        <span class="route-segment" aria-hidden="true"></span>
+        <span class="route-node relay-node" aria-hidden="true"><b>R</b></span>
+        <span class="route-segment" aria-hidden="true"></span>
+        <span class="route-node claimant-node" aria-hidden="true">C</span>
+        <span class="moving-packet" aria-hidden="true"></span>
+      </div>
+      <div class="relay-readout">
+        <strong>${Number(event.bytes).toLocaleString()} B</strong>
+        <span>opaque · meaning hidden</span>
+      </div>
     </li>
-  `).join("");
+  `;
+  }).join("");
+}
+
+function renderPhases(stage) {
+  const states = phaseStates(stage);
+  elements.phases.forEach((phase) => {
+    const state = states[phase.dataset.phase];
+    phase.dataset.state = state;
+    const status = phase.querySelector(".phase-status");
+    status.textContent = phaseStatus(state);
+    if (state === "current") {
+      phase.setAttribute("aria-current", "step");
+    } else {
+      phase.removeAttribute("aria-current");
+    }
+  });
+}
+
+function phaseStates(stage) {
+  if (stage === "awaiting-decision") {
+    return {
+      invitation: "complete",
+      pake: "complete",
+      finished: "complete",
+      roles: "complete",
+      intent: "complete",
+      consent: "current",
+      grant: "locked",
+    };
+  }
+  if (stage === "grant-delivered") {
+    return Object.fromEntries(elements.phases.map((phase) => [phase.dataset.phase, "complete"]));
+  }
+  if (stage === "declined") {
+    return {
+      invitation: "complete",
+      pake: "complete",
+      finished: "complete",
+      roles: "complete",
+      intent: "complete",
+      consent: "declined",
+      grant: "skipped",
+    };
+  }
+  return {
+    invitation: "current",
+    pake: "locked",
+    finished: "locked",
+    roles: "locked",
+    intent: "locked",
+    consent: "locked",
+    grant: "locked",
+  };
+}
+
+function phaseStatus(state) {
+  if (state === "complete") return "done";
+  if (state === "declined") return "declined";
+  if (state === "skipped") return "not released";
+  return state;
 }
 
 function renderOutcome(outcome) {

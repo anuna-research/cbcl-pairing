@@ -263,7 +263,7 @@ impl DemoCeremony {
             claims,
             carrier: json!({
                 "relay": RELAY_ORIGIN,
-                "nameplate": format!("{nameplate:09}"),
+                "nameplate": nameplate.to_string(),
                 "words": [words[0], words[1]],
                 "entropyBits": 22,
                 "note": "The invitation travels out of band; the relay never receives these words."
@@ -664,6 +664,16 @@ mod tests {
         let started = app.start().expect("start demo");
         assert_eq!(started["stage"], "awaiting-decision");
         assert_eq!(started["carrier"]["entropyBits"], 22);
+        let nameplate = started["carrier"]["nameplate"]
+            .as_str()
+            .expect("display nameplate");
+        assert_eq!(
+            nameplate
+                .parse::<u32>()
+                .expect("numeric nameplate")
+                .to_string(),
+            nameplate
+        );
         assert_eq!(started["intent"]["application"], AGENT_APPLICATION);
         assert_eq!(started["relay"]["frames"], 6);
 
