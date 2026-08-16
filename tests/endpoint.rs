@@ -977,3 +977,46 @@ fn test_022_two_valid_decision_siblings_received_in_sequence_are_terminal() {
     assert!(allocator.secrets_erased());
     assert_eq!(allocator.delivered_payloads(), 0);
 }
+
+#[test]
+fn a_replayed_channel_frame_is_refused_and_terminates_the_endpoint() {
+    // Replay protection lives in the secure channel, not in the reducer's
+    // per-control replay guards: a frame that has already been opened cannot be
+    // opened again, so a duplicate never reaches the reducer's own idempotence
+    // checks. A replay is treated as tampering and is terminal.
+    let (mut allocator, mut claimant) = confirmed_pair();
+    let intent_frame = allocator.send_intent(&intent()).expect("intent");
+    assert!(
+        !claimant
+            .receive_frame(&intent_frame)
+            .expect("display intent")
+            .is_empty(),
+        "the first delivery displays the intent"
+    );
+    assert_eq!(
+        claimant.receive_frame(&intent_frame),
+        Err(ReducerError::Channel),
+        "the identical frame cannot be opened twice"
+    );
+    assert_eq!(claimant.terminal_reason(), Some(TerminalReason::Channel));
+    assert!(claimant.secrets_erased());
+    assert_eq!(claimant.delivered_payloads(), 0);
+
+    // The same holds for a decision travelling in the other direction.
+    let (mut allocator, mut claimant) = confirmed_pair();
+    let intent_frame = allocator.send_intent(&intent()).expect("intent");
+    claimant.receive_frame(&intent_frame).expect("display");
+    let approval = claimant.decide(Decision::Approve).expect("approve");
+    let approval_frame = extract_frame(&approval);
+    assert!(allocator
+        .receive_frame(&approval_frame)
+        .expect("approval")
+        .is_empty());
+    assert_eq!(
+        allocator.receive_frame(&approval_frame),
+        Err(ReducerError::Channel),
+        "a replayed approval frame is refused"
+    );
+    assert_eq!(allocator.terminal_reason(), Some(TerminalReason::Channel));
+    assert!(allocator.secrets_erased());
+}

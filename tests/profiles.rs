@@ -352,3 +352,162 @@ fn credential_and_synthetic_payloads_bind_every_profile_field() {
         Err(ProfileError::InvalidPayload)
     );
 }
+
+fn agent_claims(channel: &str) -> AgentIntentClaims {
+    AgentIntentClaims {
+        channel: channel.to_owned(),
+        claimed_principal: "principal".to_owned(),
+        agent_handle: "handle".to_owned(),
+        requested_grant: "grant".to_owned(),
+    }
+}
+
+fn credential_claims(origin: &str) -> CredentialIntentClaims {
+    CredentialIntentClaims {
+        application_id: "application".to_owned(),
+        origin: origin.to_owned(),
+        scope: "scope".to_owned(),
+        recipient: "recipient".to_owned(),
+    }
+}
+
+#[test]
+fn bounded_claim_text_holds_at_its_exact_limit_and_refuses_the_edges() {
+    // The channel field is bounded at 64 characters. Sitting exactly on the
+    // limit is what distinguishes `>` from `>=`; only testing well inside and
+    // well outside leaves the boundary itself unproven.
+    agent_claims(&"c".repeat(64))
+        .encode()
+        .expect("a channel of exactly the maximum length is accepted");
+
+    for (why, channel) in [
+        ("one character past the maximum", "c".repeat(65)),
+        ("an empty value", String::new()),
+        ("an embedded control character", "chan\u{7}nel".to_owned()),
+        ("an embedded newline", "chan\nnel".to_owned()),
+    ] {
+        assert_eq!(
+            agent_claims(&channel).encode().unwrap_err(),
+            ProfileError::InvalidClaim,
+            "a channel with {why} must be refused"
+        );
+    }
+
+    // The same bound applies to the fields validated together with it.
+    for (why, claims) in [
+        (
+            "an over-long principal",
+            AgentIntentClaims {
+                claimed_principal: "p".repeat(256),
+                ..agent_claims("channel")
+            },
+        ),
+        (
+            "an over-long handle",
+            AgentIntentClaims {
+                agent_handle: "h".repeat(129),
+                ..agent_claims("channel")
+            },
+        ),
+        (
+            "an over-long requested grant",
+            AgentIntentClaims {
+                requested_grant: "g".repeat(129),
+                ..agent_claims("channel")
+            },
+        ),
+    ] {
+        assert_eq!(
+            claims.encode().unwrap_err(),
+            ProfileError::InvalidClaim,
+            "claims with {why} must be refused"
+        );
+    }
+}
+
+#[test]
+fn credential_origins_must_be_canonical_https_authorities() {
+    credential_claims("https://example.com")
+        .encode()
+        .expect("a canonical https origin is accepted");
+    credential_claims("https://example.com:8443")
+        .encode()
+        .expect("an explicit port stays canonical");
+
+    for (why, origin) in [
+        ("a plaintext scheme", "http://example.com"),
+        ("a non-web scheme", "ftp://example.com"),
+        ("embedded credentials", "https://user@example.com"),
+        ("an embedded password", "https://user:secret@example.com"),
+        ("a query string", "https://example.com/?scope=all"),
+        ("a fragment", "https://example.com/#section"),
+        ("a path segment", "https://example.com/callback"),
+        ("a trailing slash", "https://example.com/"),
+        ("no host at all", "https://"),
+        ("an unparseable value", "not a url"),
+    ] {
+        assert_eq!(
+            credential_claims(origin).encode().unwrap_err(),
+            ProfileError::InvalidClaim,
+            "an origin with {why} must be refused"
+        );
+    }
+}
+
+#[test]
+fn grant_payloads_hold_at_both_ends_of_their_size_bound() {
+    let grant = |bytes: Vec<u8>| AgentGrant {
+        claimed_principal: "principal".to_owned(),
+        agent_handle: "handle".to_owned(),
+        requested_grant: "grant".to_owned(),
+        grant: bytes,
+    };
+
+    grant(vec![0x5a])
+        .encode()
+        .expect("a single grant octet meets the minimum");
+    grant(vec![0x5a; 63_000])
+        .encode()
+        .expect("a grant of exactly the maximum size is accepted");
+
+    assert_eq!(
+        grant(Vec::new()).encode().unwrap_err(),
+        ProfileError::InvalidPayload,
+        "an empty grant is below the minimum"
+    );
+    assert_eq!(
+        grant(vec![0x5a; 63_001]).encode().unwrap_err(),
+        ProfileError::InvalidPayload,
+        "one octet past the maximum must be refused"
+    );
+}
+
+#[test]
+fn synthetic_claims_are_bounded_on_both_fields() {
+    let claims = |subject: String, audience: String| SyntheticIntentClaims { subject, audience };
+
+    claims("s".repeat(128), "a".repeat(128))
+        .encode()
+        .expect("fields of exactly the maximum length are accepted");
+
+    for (why, subject, audience) in [
+        (
+            "an over-long subject",
+            "s".repeat(129),
+            "audience".to_owned(),
+        ),
+        (
+            "an over-long audience",
+            "subject".to_owned(),
+            "a".repeat(129),
+        ),
+        ("an empty subject", String::new(), "audience".to_owned()),
+        ("an empty audience", "subject".to_owned(), String::new()),
+    ] {
+        assert_eq!(
+            claims(subject, audience).encode().unwrap_err(),
+            ProfileError::InvalidClaim,
+            "synthetic claims with {why} must be refused"
+        );
+    }
+}
