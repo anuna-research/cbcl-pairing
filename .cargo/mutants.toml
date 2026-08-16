@@ -1,0 +1,45 @@
+# Broad mutation sweep configuration.
+#
+# This complements `tools/run-mutations.sh`, which applies the seven curated
+# security mutations in `mutations/` and is a required CI gate. The sweep here
+# is exploratory: it enumerates every mutant cargo-mutants can generate and
+# reports which ones no test kills. Survivors are triage input, not a gate.
+
+# Exercise the relay and WebSocket surfaces alongside the default library.
+# `--locked` keeps the pinned `cbcl-rs` revision honest across mutant builds.
+additional_cargo_args = ["--all-features", "--locked"]
+
+# Each mutant runs the suite single-threaded so that one worker occupies roughly
+# one core. Without it, every parallel worker also fans out across test threads,
+# the machine ends up two to three times oversubscribed, and slow runs are
+# misreported as hangs. This is set as `RUST_TEST_THREADS` by
+# `tools/run-mutant-sweep.sh` rather than as a config key here: cargo-mutants
+# 27.1 splices `additional_cargo_test_args` into the cargo command line without
+# a `--` separator, so cargo rejects `--test-threads` outright.
+
+# The unmutated suite finishes in a few seconds, but several suites spawn relay
+# processes and block on sockets, so a mutant that breaks a handshake stalls
+# until the client gives up rather than failing fast. The floor here is what
+# separates a genuine hang from a merely slow run under parallel workers; 68s
+# proved far too tight and turned 40% of a sweep into inconclusive timeouts.
+timeout_multiplier = 6.0
+minimum_test_timeout = 300
+
+# Binary entry points are thin argument-parsing wrappers over `relay.rs`. Their
+# mutants are exercised only through process-spawning integration tests, which
+# makes them both slow and low-signal. Sweep the library instead.
+exclude_globs = [
+    "src/bin/**",
+    "examples/**",
+    "fuzz/**",
+]
+
+# Mutating a `Debug`/`Display` body proves nothing about protocol behaviour.
+# These patterns match the generated mutant name, which spells the impl out as
+# `<impl fmt::Display for ReducerError>::fmt`, so match on `fmt::` rather than
+# on the source text `impl Display`.
+# Some impls are written `fmt::Display`, others `std::fmt::Display`; match both.
+exclude_re = [
+    "fmt::Debug for",
+    "fmt::Display for",
+]
