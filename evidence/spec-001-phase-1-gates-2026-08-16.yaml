@@ -1,0 +1,88 @@
+phase: 1
+phase_status: incomplete
+artifact: specs/SPEC-001-reusable-blind-pairing.md
+artifact_sha256: 3f9e62578642c6cec5468429ee5f7dc423d1b931a30482104ea23d4d21950a65
+date: "2026-08-16"
+generation:
+  model: "OpenAI Codex, GPT-5 family; deployment revision not exposed"
+  request: "Create a new specification based on cbcl-bus SPEC-072 and the implemented cbcl-pairing repository"
+  parameters: "Not exposed by the execution environment"
+  inputs:
+    - "cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574edc8"
+    - "cbcl-pairing implementation baseline 4f7b18644991cae974bb3aaa49d296182ea63918"
+    - "cbcl-pairing documentation baseline 36ac1344d094c585b7ada2dce00763eeecb6b670"
+  output: "Candidate repository-local SPEC-001 v0.1.0"
+  reviewer: "Unverified; fresh-context cross-model and human reviews remain open"
+  decision: "Keep status draft and production allocation disabled"
+trajectory:
+  - revision: S0
+    change: "Restated SPEC-072 obligations against exact local schemas, dialects, tests, and evidence"
+    finding: "The first draft contained an incorrect expanded implementation hash, claimed authority before approval, and represented failure modes as an unlinked table"
+  - revision: S1
+    attribution: "Provenance and authority; FM-to-REQ traceability"
+    feedback: "Use exact Git hashes, preserve source authority while draft, and make every failure mode an addressable artifact"
+    change: "Corrected both baseline hashes, made authority transition conditional on approval, and added FM headings with fully qualified links"
+  - revision: S2
+    attribution: "SPEC-072 open-question fidelity"
+    feedback: "Do not collapse six source questions into broader review buckets"
+    change: "Restored OQ-001 through OQ-006 meanings and kept independent review requirements under production gates"
+adversarial_tests:
+  - test: "A relay performs CPace or interprets application bodies"
+    disposition: "Rejected by REQ-002, CON-002, and TEST-002"
+  - test: "A third membership uses the same low-entropy invitation"
+    disposition: "Terminal crowding under REQ-005, CON-003, and TEST-003"
+  - test: "Payload authorization advances pairing before Finished or consent"
+    disposition: "Rejected by REQ-008, REQ-009, REQ-014, TEST-008, and TEST-019"
+  - test: "Both sibling decisions pass generic causal verification"
+    disposition: "Endpoint ledger selects the first decision atomically under CON-010 and TEST-022"
+  - test: "An implementation edit silently changes a cross-repository protocol asset"
+    disposition: "Prevented after approval by ADR-010, exact asset hashes, and Amendment Channels"
+gates:
+  - gate: "Intent source is fixed and implementation is evidence rather than requirement authority"
+    mechanism: "git show plus SHA-256 comparison and provenance review"
+    result: pass
+    evidence: "SPEC-072 commit 9b966e04d0a8e21ecc0fe9f8de508f953574edc8; source SHA-256 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e; specification Provenance and authority section"
+  - gate: "Normative local assets are exact"
+    mechanism: "shasum -a 256 over both schemas and both dialect sources"
+    result: pass
+    evidence: "CDDL c8f7e57a1a944dd999ebeeb20260368d3315ade26748fbab8361de2643240fc9; ABNF a9274224793f49551d402110f6787c1d2be9034d2a3eb149ea9c8c0ff38cb1fa; bootstrap 5607ca9c015767c433040e58e261828e6c29d427ec66ce1b76e2294cfecfa8c3; session f7908e42da5fe1a63e546f4d5e7619bb20f78d06c43273f8a839e82c459c9805"
+  - gate: "Required specification structure is present"
+    mechanism: "/Users/anuna-01/Code/anuna-dev-skill/tools/usdd-lint.sh --doc --show specs/SPEC-001-reusable-blind-pairing.md"
+    result: pass
+    evidence: "0 errors and 0 warnings on 2026-08-16"
+  - gate: "Controlled descriptive language passes"
+    mechanism: "/Users/anuna-01/Code/anuna-dev-skill/tools/usdd-lint.sh --type descriptive --show specs/SPEC-001-reusable-blind-pairing.md"
+    result: pass
+    evidence: "0 errors and 0 warnings across 381 sentences on 2026-08-16"
+  - gate: "Vault links and syntax resolve"
+    mechanism: "env -u NO_COLOR zetl check --dead-links --fail-on error -d specs"
+    result: pass
+    evidence: "0 dead links, 0 orphans, and 0 syntax errors on 2026-08-16"
+  - gate: "Every REQ reaches at least one TEST and every TEST reaches a REQ"
+    mechanism: "Traceability audit over fully qualified wikilinks"
+    result: pass
+    evidence: "15 REQ artifacts each link to one or more TEST artifacts; TEST-001 through TEST-022 each validate one or more REQ artifacts after TEST-018 repair"
+  - gate: "Implementation baseline passes all local executable tests"
+    mechanism: "cargo test --all-targets --all-features"
+    result: pass
+    evidence: "78 passed, 0 failed on 2026-08-16; external TEST-016 through TEST-018 dispositions remain separate holds"
+  - gate: "Orientation transmits the intended theory to a fresh-context reader"
+    mechanism: "Fresh-context comprehension review by a separate model family"
+    result: unverified
+    owner: "Independent cross-model specification reviewer"
+    evidence: "No independent review was authorized in this authoring session; OQ and production gate remain open"
+  - gate: "Tier-1 adversarial review is independent from the generating session"
+    mechanism: "Cross-model adversarial review plus human security review"
+    result: unverified
+    owner: "Independent security reviewer"
+    evidence: "Local adversarial cases are recorded above, but self-review cannot satisfy the Tier-1 independence gate"
+  - gate: "Cryptographic construction has human domain approval"
+    mechanism: "Named human cryptography review plus second CPace group implementation"
+    result: unverified
+    owner: "Human cryptography reviewer"
+    evidence: "TEST-016 external hold and OQ-001 remain open"
+  - gate: "Stakeholder accepts this draft as repository authority"
+    mechanism: "Specification-owner review and explicit status transition"
+    result: unverified
+    owner: "cbcl-pairing specification owner"
+    evidence: "Draft has not received stakeholder validation; SPEC-072 remains design authority"

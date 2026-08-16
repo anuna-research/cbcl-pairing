@@ -1,8 +1,9 @@
 # cbcl-pairing
 
-`cbcl-pairing` is the reusable SPEC-072 pairing core. Two peers use a one-time
-secret to establish an authenticated channel and exchange a human-readable
-intent. The application releases a grant only after approval.
+`cbcl-pairing` is the reusable blind-pairing core described by the local draft
+SPEC-001 and derived from `cbcl-bus` SPEC-072. Two peers use a one-time secret
+to establish an authenticated channel and exchange a human-readable intent.
+The application releases a grant only after approval.
 An optional blind relay gives them asynchronous rendezvous without becoming a
 cryptographic endpoint.
 
@@ -191,7 +192,7 @@ The current limiter is memory-only. Therefore, the file-backed key does not
 preserve cooldown history across a restart. It mainly establishes operator
 separation and an explicit rotation boundary. A startup-generated key is
 sufficient for one isolated process; adopting that simpler operator experience
-requires a SPEC-072 revision.
+requires an approved specification revision.
 
 ## Why it is reusable
 
@@ -260,11 +261,12 @@ nightly toolchain and `cargo-fuzz`; it does not retain corpora in Git.
 
 ## Documentation
 
+- [Repository-local SPEC-001](specs/SPEC-001-reusable-blind-pairing.md)
 - [API and integration boundary](docs/API.md)
 - [Application tutorial](docs/TUTORIAL.md)
 - [Relay operator guide](docs/OPERATOR.md)
 - [Security model and production gates](docs/SECURITY.md)
-- [SPEC-072](https://git.anuna.io/anuna-research/cbcl-bus/src/branch/main/specs/SPEC-072-unified-pairing-mailbox.md)
+- [Design provenance: cbcl-bus SPEC-072](https://git.anuna.io/anuna-research/cbcl-bus/src/branch/main/specs/SPEC-072-unified-pairing-mailbox.md)
 
 The executable endpoint composition in `tests/endpoint.rs` and the two-process
 relay exercise in `tests/relay_process.rs` are the current end-to-end reference
