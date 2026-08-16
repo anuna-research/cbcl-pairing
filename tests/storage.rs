@@ -10,6 +10,7 @@ use cbcl_pairing::{
 use std::{
     fs,
     path::PathBuf,
+    sync::atomic::{AtomicUsize, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -81,11 +82,22 @@ fn bind(relay: &mut RelayService, connection: u64, now: u64) {
 }
 
 fn temporary_store() -> PathBuf {
+    // The tests in this file run as parallel threads of one process, so the
+    // process id is shared and the clock is the only thing separating their
+    // store directories. `as_nanos` reports nanoseconds but is not guaranteed
+    // to advance that finely, so two tests starting together can be handed the
+    // same stamp and then race on the same directory. The counter makes the
+    // name unique regardless of clock resolution.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let unique = NEXT.fetch_add(1, Ordering::Relaxed);
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("cbcl-pairing-store-{}-{stamp}", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "cbcl-pairing-store-{}-{stamp}-{unique}",
+        std::process::id()
+    ))
 }
 
 fn service(path: &PathBuf, allocation: bool) -> RelayService {
