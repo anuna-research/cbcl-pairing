@@ -3,6 +3,11 @@ const elements = {
   reset: document.querySelector("#reset"),
   approve: document.querySelector("#approve"),
   decline: document.querySelector("#decline"),
+  claimForm: document.querySelector("#claim-form"),
+  claim: document.querySelector("#claim"),
+  nameplateInput: document.querySelector("#nameplate-input"),
+  wordFirst: document.querySelector("#word-first"),
+  wordSecond: document.querySelector("#word-second"),
   busy: document.querySelector("#busy"),
   headline: document.querySelector("#headline"),
   allocatorState: document.querySelector("#allocator-state"),
@@ -20,11 +25,16 @@ const elements = {
   outcome: document.querySelector("#outcome"),
 };
 
-async function request(path) {
-  setBusy(true, "Running protocol…");
+async function request(path, body = null, message = "Running protocol…") {
+  setBusy(true, message);
   let errorMessage = "";
   try {
-    const response = await fetch(path, { method: "POST" });
+    const options = { method: "POST" };
+    if (body) {
+      options.headers = { "Content-Type": "application/json" };
+      options.body = JSON.stringify(body);
+    }
+    const response = await fetch(path, options);
     const state = await response.json();
     if (!response.ok) {
       throw new Error(state.error || `Request failed (${response.status})`);
@@ -47,6 +57,10 @@ function setBusy(busy, message = "") {
   elements.reset.disabled = busy;
   elements.approve.disabled = busy;
   elements.decline.disabled = busy;
+  elements.claim.disabled = busy;
+  elements.nameplateInput.disabled = busy;
+  elements.wordFirst.disabled = busy;
+  elements.wordSecond.disabled = busy;
   elements.busy.classList.remove("error");
   elements.busy.textContent = busy ? message : "";
 }
@@ -60,12 +74,14 @@ function render(state) {
   elements.relayNote.textContent = state.relay.note;
 
   renderCarrier(state.carrier);
-  renderIntent(state.intent);
+  renderIntent(state.intent, state.stage);
   renderPhases(state.stage);
-  renderTimeline(state.timeline);
+  renderTimeline(state.timeline, state.stage);
   renderOutcome(state.outcome);
 
   const awaiting = state.stage === "awaiting-decision";
+  const enteringWords = state.stage === "invitation-created";
+  elements.claimForm.hidden = !enteringWords;
   elements.decisionControls.hidden = !awaiting;
   elements.allocatorState.textContent = allocatorLabel(state.stage);
   elements.claimantState.textContent = claimantLabel(state.stage);
@@ -91,10 +107,16 @@ function renderCarrier(carrier) {
   `;
 }
 
-function renderIntent(intent) {
+function renderIntent(intent, stage) {
   if (!intent) {
     elements.intent.className = "empty";
-    elements.intent.textContent = "Authenticated intent will appear here.";
+    if (stage === "invitation-created") {
+      elements.intent.textContent = "The authenticated intent stays sealed until the nameplate resolves and the words prove the invitation.";
+    } else if (stage === "failed") {
+      elements.intent.textContent = "The words did not match. The intent stayed sealed.";
+    } else {
+      elements.intent.textContent = "Authenticated intent will appear here.";
+    }
     return;
   }
   const fields = intent.fields.map((field) => `
@@ -112,9 +134,14 @@ function renderIntent(intent) {
   `;
 }
 
-function renderTimeline(timeline) {
+function renderTimeline(timeline, stage) {
   if (!timeline.length) {
-    elements.timeline.innerHTML = '<li class="empty-row">Create an invitation to begin.</li>';
+    const message = stage === "invitation-created"
+      ? "Waiting for the claimant to enter the nameplate and both invitation words. No protocol frames have crossed the relay."
+      : stage === "failed"
+        ? "The invitation was consumed before any intent, decision, or grant frame was released."
+        : "Create an invitation to begin.";
+    elements.timeline.innerHTML = `<li class="empty-row">${message}</li>`;
     return;
   }
   elements.timeline.innerHTML = timeline.map((event, index) => {
@@ -161,6 +188,17 @@ function renderPhases(stage) {
 }
 
 function phaseStates(stage) {
+  if (stage === "invitation-created") {
+    return {
+      invitation: "complete",
+      pake: "current",
+      finished: "locked",
+      roles: "locked",
+      intent: "locked",
+      consent: "locked",
+      grant: "locked",
+    };
+  }
   if (stage === "awaiting-decision") {
     return {
       invitation: "complete",
@@ -186,6 +224,17 @@ function phaseStates(stage) {
       grant: "skipped",
     };
   }
+  if (stage === "failed") {
+    return {
+      invitation: "complete",
+      pake: "failed",
+      finished: "skipped",
+      roles: "skipped",
+      intent: "skipped",
+      consent: "skipped",
+      grant: "skipped",
+    };
+  }
   return {
     invitation: "current",
     pake: "locked",
@@ -200,6 +249,7 @@ function phaseStates(stage) {
 function phaseStatus(state) {
   if (state === "complete") return "done";
   if (state === "declined") return "declined";
+  if (state === "failed") return "failed";
   if (state === "skipped") return "not released";
   return state;
 }
@@ -234,15 +284,19 @@ function listItems(items) {
 
 function allocatorLabel(stage) {
   if (stage === "idle") return "waiting";
+  if (stage === "invitation-created") return "invitation ready";
   if (stage === "awaiting-decision") return "intent sent";
   if (stage === "grant-delivered") return "grant sent";
+  if (stage === "failed") return "invitation consumed";
   return "closed";
 }
 
 function claimantLabel(stage) {
   if (stage === "idle") return "waiting";
+  if (stage === "invitation-created") return "enter invitation";
   if (stage === "awaiting-decision") return "decision needed";
   if (stage === "grant-delivered") return "verified";
+  if (stage === "failed") return "not paired";
   return "declined";
 }
 
@@ -255,10 +309,27 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-elements.start.addEventListener("click", () => request("/api/start"));
+elements.start.addEventListener("click", () => {
+  elements.nameplateInput.value = "";
+  elements.wordFirst.value = "";
+  elements.wordSecond.value = "";
+  request("/api/start", null, "Creating invitation…");
+});
 elements.reset.addEventListener("click", () => request("/api/reset"));
 elements.approve.addEventListener("click", () => request("/api/approve"));
 elements.decline.addEventListener("click", () => request("/api/decline"));
+elements.claimForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  request(
+    "/api/claim",
+    {
+      nameplate: elements.nameplateInput.value.trim(),
+      first: elements.wordFirst.value.trim(),
+      second: elements.wordSecond.value.trim(),
+    },
+    "Proving invitation…",
+  );
+});
 
 fetch("/api/state")
   .then((response) => response.json())

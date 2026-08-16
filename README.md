@@ -241,9 +241,13 @@ Run the loopback-only web example, then open `http://127.0.0.1:8088`:
 cargo run --features relay --example web-demo
 ```
 
-The page creates a fresh two-word agent invitation with OS randomness. It runs
-the real CPace exchange, both Finished checks, authenticated CBCL role cast,
-intent recognition, approval or decline, and application grant verification.
+The page creates a fresh agent invitation with OS randomness. The claimant must
+enter its natural-decimal nameplate and both exact words before it runs the real
+CPace exchange, both Finished checks, authenticated CBCL role cast, intent
+recognition, approval or decline, and application grant verification. Invalid
+input or an unresolved nameplate can be corrected without touching the
+invitation; one valid-but-wrong word pair consumes it without revealing the
+intent.
 
 Both endpoints and relay instrumentation live in the same demo process. The
 relay panel reports only opaque frame sizes and explains its actual visibility;

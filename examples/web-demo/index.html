@@ -13,9 +13,9 @@
         <p class="eyebrow">cbcl-pairing · agent profile</p>
         <h1>A private introduction,<br>through a blind relay.</h1>
         <p class="lede">
-          Run one real pairing ceremony. The endpoints authenticate a two-word
-          invitation, reveal an exact intent to the person, then release a grant
-          only after approval.
+          Create a two-word invitation, have the claimant enter it, and run one
+          real pairing ceremony. The endpoints reveal an exact intent to the
+          person, then release a grant only after approval.
         </p>
       </div>
       <div class="status-cluster">
@@ -115,7 +115,26 @@
             <span id="claimant-state" class="state">waiting</span>
           </div>
           <h2>Person approving</h2>
-          <p class="muted">Sees intent only after CPace and both Finished values verify.</p>
+          <p class="muted">Enters the invitation, then sees intent only after CPace and both Finished values verify.</p>
+          <form id="claim-form" class="claim-form" hidden>
+            <p class="claim-form-title">Enter the complete invitation</p>
+            <label class="nameplate-input" for="nameplate-input">
+              <span>Nameplate</span>
+              <input id="nameplate-input" name="nameplate" type="text" required maxlength="9" inputmode="numeric" pattern="0|[1-9][0-9]{0,8}" autocomplete="off" spellcheck="false">
+            </label>
+            <div class="word-inputs">
+              <label for="word-first">
+                <span>Word 1</span>
+                <input id="word-first" name="first" type="text" required maxlength="32" autocomplete="off" autocapitalize="none" spellcheck="false">
+              </label>
+              <label for="word-second">
+                <span>Word 2</span>
+                <input id="word-second" name="second" type="text" required maxlength="32" autocomplete="off" autocapitalize="none" spellcheck="false">
+              </label>
+            </div>
+            <button id="claim" class="primary" type="submit">Join ceremony</button>
+            <p class="fine-print">Enter the natural decimal nameplate and exact lowercase English BIP-39 words. Invalid input or an unresolved nameplate can be corrected; a valid but wrong word pair consumes this one-attempt invitation.</p>
+          </form>
           <div id="intent" class="empty">Authenticated intent will appear here.</div>
           <div id="decision-controls" class="decision-controls" hidden>
             <button id="approve" class="approve" type="button">Approve once</button>

@@ -293,15 +293,21 @@ h1 {
   background: #f3e7e4;
 }
 
-.phase-rail li[data-state="declined"] .phase-index {
+.phase-rail li[data-state="declined"] .phase-index,
+.phase-rail li[data-state="failed"] .phase-index {
   border-color: var(--red);
   color: white;
   background: var(--red);
 }
 
 .phase-rail li[data-state="declined"] .phase-status,
+.phase-rail li[data-state="failed"] .phase-status,
 .phase-rail li[data-state="skipped"] .phase-status {
   color: var(--red);
+}
+
+.phase-rail li[data-state="failed"] {
+  background: #f3e7e4;
 }
 
 .phase-rail li[data-state="skipped"] .phase-index {
@@ -452,6 +458,71 @@ dd {
 .claim-note {
   margin-top: 1rem;
   font-size: 0.72rem;
+}
+
+.claim-form {
+  margin-top: 1.5rem;
+  border: 1px solid #b8d8c5;
+  border-radius: 16px;
+  padding: 1rem;
+  background: rgba(220, 238, 228, 0.48);
+}
+
+.claim-form[hidden] {
+  display: none;
+}
+
+.claim-form-title {
+  margin-bottom: 0.75rem;
+  font-size: 0.83rem;
+  font-weight: 800;
+}
+
+.word-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+  margin-bottom: 0.8rem;
+}
+
+.nameplate-input,
+.word-inputs label {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.nameplate-input {
+  margin-bottom: 0.65rem;
+}
+
+.nameplate-input span,
+.word-inputs label span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.nameplate-input input,
+.word-inputs input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #9fbaaa;
+  border-radius: 10px;
+  padding: 0.68rem 0.72rem;
+  color: var(--ink);
+  background: var(--panel);
+  font: 750 0.88rem ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.nameplate-input input:focus-visible,
+.word-inputs input:focus-visible {
+  border-color: var(--green);
+  outline: 3px solid rgba(23, 107, 77, 0.18);
+  outline-offset: 1px;
+}
+
+.claim-form .fine-print {
+  margin-bottom: 0;
 }
 
 .intent h3 {

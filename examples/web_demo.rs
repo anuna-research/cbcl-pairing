@@ -33,6 +33,7 @@ const INDEX_HTML: &str = include_str!("web-demo/index.html");
 const APP_JS: &str = include_str!("web-demo/app.js");
 const STYLE_CSS: &str = include_str!("web-demo/style.css");
 const MAX_REQUEST_HEAD: usize = 16 * 1024;
+const MAX_REQUEST_BODY: usize = 1024;
 
 type DemoResult<T> = Result<T, Box<dyn Error>>;
 
@@ -42,6 +43,65 @@ struct DemoVerifier;
 impl GrantVerifier for DemoVerifier {
     fn verify(&mut self, _payload: &RecognisedPayload) -> Result<(), ProfileError> {
         Ok(())
+    }
+}
+
+struct DemoInvitation {
+    mailbox_id: [u8; 32],
+    invitation: Invitation,
+    carrier: Value,
+}
+
+impl DemoInvitation {
+    fn allocate() -> DemoResult<Self> {
+        let mailbox_id = random_array::<32>()?;
+        let word_pair = AgentWordPair::from_csprng_octets(random_array::<3>()?);
+        let words = word_pair.words();
+        let nameplate = u32::from_be_bytes(random_array::<4>()?) % 1_000_000_000;
+        Ok(Self {
+            mailbox_id,
+            invitation: Invitation {
+                application: AGENT_APPLICATION.into(),
+                relay_origin: RELAY_ORIGIN.into(),
+                locator: Locator::Nameplate(nameplate),
+                secret: word_pair.secret().to_vec(),
+                expected_allocator_key: None,
+                expected_claimant_key: None,
+            },
+            carrier: json!({
+                "relay": RELAY_ORIGIN,
+                "nameplate": nameplate.to_string(),
+                "words": [words[0], words[1]],
+                "entropyBits": 22,
+                "note": "Give the nameplate and both words to the claimant out of band. The relay later sees the public nameplate, but never the words."
+            }),
+        })
+    }
+
+    fn snapshot(&self) -> Value {
+        snapshot(
+            "invitation-created",
+            "Invitation ready for claimant",
+            &self.carrier,
+            &Value::Null,
+            &[],
+            Value::Null,
+        )
+    }
+
+    fn failed_snapshot(&self) -> Value {
+        snapshot(
+            "failed",
+            "Invitation consumed after key mismatch",
+            &self.carrier,
+            &Value::Null,
+            &[],
+            json!({
+                "kind": "failed",
+                "message": "Those valid invitation words did not match. No intent, payload, or grant was released.",
+                "next": "This invitation allowed one online guess and is now consumed. Start fresh to try again."
+            }),
+        )
     }
 }
 
@@ -55,19 +115,12 @@ struct DemoCeremony {
 }
 
 impl DemoCeremony {
-    fn start() -> DemoResult<Self> {
-        let mailbox_id = random_array::<32>()?;
-        let word_pair = AgentWordPair::from_csprng_octets(random_array::<3>()?);
-        let words = word_pair.words();
-        let nameplate = u32::from_be_bytes(random_array::<4>()?) % 1_000_000_000;
-        let invitation_value = Invitation {
-            application: AGENT_APPLICATION.into(),
-            relay_origin: RELAY_ORIGIN.into(),
-            locator: Locator::Nameplate(nameplate),
-            secret: word_pair.secret().to_vec(),
-            expected_allocator_key: None,
-            expected_claimant_key: None,
-        };
+    fn start(pending: DemoInvitation) -> DemoResult<Self> {
+        let DemoInvitation {
+            mailbox_id,
+            invitation: invitation_value,
+            carrier,
+        } = pending;
         let invitation = encode_invitation(&invitation_value)?;
         let ceremony = cbcl_pairing::cbcl_protocol::ceremony_id(&invitation);
 
@@ -261,13 +314,7 @@ impl DemoCeremony {
             allocator,
             claimant,
             claims,
-            carrier: json!({
-                "relay": RELAY_ORIGIN,
-                "nameplate": nameplate.to_string(),
-                "words": [words[0], words[1]],
-                "entropyBits": 22,
-                "note": "The invitation travels out of band; the relay never receives these words."
-            }),
+            carrier,
             intent: display_json(&display),
             timeline,
         })
@@ -360,6 +407,7 @@ impl DemoCeremony {
 }
 
 struct DemoApp {
+    invitation: Option<DemoInvitation>,
     ceremony: Option<DemoCeremony>,
     public_state: Value,
 }
@@ -367,13 +415,42 @@ struct DemoApp {
 impl DemoApp {
     fn new() -> Self {
         Self {
+            invitation: None,
             ceremony: None,
             public_state: idle_snapshot(),
         }
     }
 
     fn start(&mut self) -> DemoResult<Value> {
-        let ceremony = DemoCeremony::start()?;
+        let invitation = DemoInvitation::allocate()?;
+        let state = invitation.snapshot();
+        self.invitation = Some(invitation);
+        self.ceremony = None;
+        self.public_state = state.clone();
+        Ok(state)
+    }
+
+    fn claim(&mut self, nameplate: u32, words: AgentWordPair) -> DemoResult<Value> {
+        let pending = self
+            .invitation
+            .as_ref()
+            .ok_or_else(|| demo_error("create a fresh invitation first"))?;
+        if !matches!(pending.invitation.locator, Locator::Nameplate(value) if value == nameplate) {
+            return Err(demo_error("that nameplate does not resolve this invitation").into());
+        }
+
+        let invitation = self
+            .invitation
+            .take()
+            .expect("the pending invitation was just borrowed");
+        if words.secret().to_vec() != invitation.invitation.secret {
+            let state = invitation.failed_snapshot();
+            self.ceremony = None;
+            self.public_state = state.clone();
+            return Ok(state);
+        }
+
+        let ceremony = DemoCeremony::start(invitation)?;
         let state = ceremony.snapshot();
         self.ceremony = Some(ceremony);
         self.public_state = state.clone();
@@ -391,6 +468,7 @@ impl DemoApp {
     }
 
     fn reset(&mut self) -> Value {
+        self.invitation = None;
         self.ceremony = None;
         self.public_state = idle_snapshot();
         self.public_state.clone()
@@ -433,7 +511,9 @@ fn handle_connection(mut stream: TcpStream, app: &mut DemoApp) -> io::Result<()>
             break;
         }
         request.extend_from_slice(&chunk[..read]);
-        if request.len() > MAX_REQUEST_HEAD {
+        if request.len() > MAX_REQUEST_HEAD
+            && !request.windows(4).any(|window| window == b"\r\n\r\n")
+        {
             return write_response(
                 &mut stream,
                 "431 Request Header Fields Too Large",
@@ -446,27 +526,84 @@ fn handle_connection(mut stream: TcpStream, app: &mut DemoApp) -> io::Result<()>
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
         .ok_or_else(|| demo_error("incomplete HTTP request"))?;
-    let head = std::str::from_utf8(&request[..head_end])
-        .map_err(|_| demo_error("request head is not UTF-8"))?;
-    let mut request_parts = head
-        .lines()
-        .next()
-        .ok_or_else(|| demo_error("missing request line"))?
-        .split_whitespace();
-    let method = request_parts
-        .next()
-        .ok_or_else(|| demo_error("missing request method"))?;
-    let path = request_parts
-        .next()
-        .ok_or_else(|| demo_error("missing request path"))?;
-    let version = request_parts
-        .next()
-        .ok_or_else(|| demo_error("missing HTTP version"))?;
-    if request_parts.next().is_some() || version != "HTTP/1.1" {
-        return write_json_error(&mut stream, "400 Bad Request", "invalid request line");
+    if head_end > MAX_REQUEST_HEAD {
+        return write_json_error(
+            &mut stream,
+            "431 Request Header Fields Too Large",
+            "request headers are too large",
+        );
     }
+    let (method, path, content_length) = {
+        let head = std::str::from_utf8(&request[..head_end])
+            .map_err(|_| demo_error("request head is not UTF-8"))?;
+        let mut lines = head.lines();
+        let mut request_parts = lines
+            .next()
+            .ok_or_else(|| demo_error("missing request line"))?
+            .split_whitespace();
+        let method = request_parts
+            .next()
+            .ok_or_else(|| demo_error("missing request method"))?;
+        let path = request_parts
+            .next()
+            .ok_or_else(|| demo_error("missing request path"))?;
+        let version = request_parts
+            .next()
+            .ok_or_else(|| demo_error("missing HTTP version"))?;
+        if request_parts.next().is_some() || version != "HTTP/1.1" {
+            return write_json_error(&mut stream, "400 Bad Request", "invalid request line");
+        }
 
-    match (method, path) {
+        let mut content_length = None;
+        for line in lines {
+            let Some((name, value)) = line.split_once(':') else {
+                return write_json_error(&mut stream, "400 Bad Request", "invalid header line");
+            };
+            if name.eq_ignore_ascii_case("content-length") {
+                if content_length.is_some() {
+                    return write_json_error(
+                        &mut stream,
+                        "400 Bad Request",
+                        "duplicate Content-Length",
+                    );
+                }
+                content_length = Some(match value.trim().parse::<usize>() {
+                    Ok(length) => length,
+                    Err(_) => {
+                        return write_json_error(
+                            &mut stream,
+                            "400 Bad Request",
+                            "Content-Length must be an unsigned decimal integer",
+                        );
+                    }
+                });
+            }
+        }
+        (
+            method.to_owned(),
+            path.to_owned(),
+            content_length.unwrap_or(0),
+        )
+    };
+
+    if content_length > MAX_REQUEST_BODY {
+        return write_json_error(
+            &mut stream,
+            "413 Content Too Large",
+            "request body is too large",
+        );
+    }
+    let body_start = head_end + 4;
+    while request.len() < body_start + content_length {
+        let read = stream.read(&mut chunk)?;
+        if read == 0 {
+            return write_json_error(&mut stream, "400 Bad Request", "incomplete request body");
+        }
+        request.extend_from_slice(&chunk[..read]);
+    }
+    let body = &request[body_start..body_start + content_length];
+
+    match (method.as_str(), path.as_str()) {
         ("GET", "/") => write_response(
             &mut stream,
             "200 OK",
@@ -489,6 +626,28 @@ fn handle_connection(mut stream: TcpStream, app: &mut DemoApp) -> io::Result<()>
                 write_json_error(&mut stream, "500 Internal Server Error", &error.to_string())
             }
         },
+        ("POST", "/api/claim") => {
+            let (nameplate, first, second) = match parse_claim_entry(body) {
+                Ok(entry) => entry,
+                Err(error) => {
+                    return write_json_error(&mut stream, "400 Bad Request", &error.to_string());
+                }
+            };
+            let words = match AgentWordPair::recognise(&first, &second) {
+                Ok(words) => words,
+                Err(_) => {
+                    return write_json_error(
+                        &mut stream,
+                        "422 Unprocessable Entity",
+                        "enter two exact lowercase English BIP-39 words",
+                    );
+                }
+            };
+            match app.claim(nameplate, words) {
+                Ok(value) => write_json(&mut stream, "200 OK", &value),
+                Err(error) => write_json_error(&mut stream, "409 Conflict", &error.to_string()),
+            }
+        }
         ("POST", "/api/approve") => match app.decide(Decision::Approve) {
             Ok(value) => write_json(&mut stream, "200 OK", &value),
             Err(error) => write_json_error(&mut stream, "409 Conflict", &error.to_string()),
@@ -524,10 +683,49 @@ fn write_response(
 ) -> io::Result<()> {
     write!(
         stream,
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )?;
     stream.flush()
+}
+
+fn parse_claim_entry(body: &[u8]) -> io::Result<(u32, String, String)> {
+    let Value::Object(mut fields) = serde_json::from_slice::<Value>(body)
+        .map_err(|_| demo_error("claim body must be valid JSON"))?
+    else {
+        return Err(demo_error("claim body must be a JSON object"));
+    };
+    if fields.len() != 3 {
+        return Err(demo_error(
+            "claim body must contain only nameplate, first, and second",
+        ));
+    }
+    let nameplate = fields
+        .remove("nameplate")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| demo_error("nameplate must be a string"))?;
+    let first = fields
+        .remove("first")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| demo_error("first must be a string"))?;
+    let second = fields
+        .remove("second")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| demo_error("second must be a string"))?;
+    if first.is_empty() || second.is_empty() || first.len() > 32 || second.len() > 32 {
+        return Err(demo_error(
+            "each invitation word must contain 1 to 32 bytes",
+        ));
+    }
+    let parsed_nameplate = nameplate
+        .parse::<u32>()
+        .map_err(|_| demo_error("nameplate must be a natural decimal number"))?;
+    if parsed_nameplate > 999_999_999 || parsed_nameplate.to_string() != nameplate {
+        return Err(demo_error(
+            "nameplate must be canonical decimal in 0..999999999",
+        ));
+    }
+    Ok((parsed_nameplate, first, second))
 }
 
 fn bound_record(
@@ -573,7 +771,7 @@ fn snapshot(
         "relay": {
             "frames": timeline.len(),
             "opaqueBytes": opaque_bytes,
-            "sees": ["network addresses", "mailbox identifier", "timing", "frame sizes", "expiry"],
+            "sees": ["network addresses", "mailbox/nameplate locator", "timing", "frame sizes", "expiry"],
             "cannotSee": ["invitation words", "application", "intent", "decision", "grant"],
             "note": "This page labels frame meaning using endpoint-side demo instrumentation. A real relay sees only opaque bytes."
         },
@@ -591,7 +789,7 @@ fn idle_snapshot() -> Value {
         "relay": {
             "frames": 0,
             "opaqueBytes": 0,
-            "sees": ["network addresses", "mailbox identifier", "timing", "frame sizes", "expiry"],
+            "sees": ["network addresses", "mailbox/nameplate locator", "timing", "frame sizes", "expiry"],
             "cannotSee": ["invitation words", "application", "intent", "decision", "grant"],
             "note": "The demo runs both endpoints in one Rust process and instruments the relay boundary."
         },
@@ -662,20 +860,27 @@ mod tests {
     fn approval_runs_the_real_pairing_and_releases_one_grant() {
         let mut app = DemoApp::new();
         let started = app.start().expect("start demo");
-        assert_eq!(started["stage"], "awaiting-decision");
+        assert_eq!(started["stage"], "invitation-created");
         assert_eq!(started["carrier"]["entropyBits"], 22);
-        let nameplate = started["carrier"]["nameplate"]
+        assert_eq!(started["relay"]["frames"], 0);
+        assert!(started["intent"].is_null());
+        let displayed_nameplate = started["carrier"]["nameplate"]
             .as_str()
             .expect("display nameplate");
         assert_eq!(
-            nameplate
+            displayed_nameplate
                 .parse::<u32>()
                 .expect("numeric nameplate")
                 .to_string(),
-            nameplate
+            displayed_nameplate
         );
-        assert_eq!(started["intent"]["application"], AGENT_APPLICATION);
-        assert_eq!(started["relay"]["frames"], 6);
+
+        let paired = app
+            .claim(carrier_nameplate(&started), carrier_words(&started))
+            .expect("enter invitation");
+        assert_eq!(paired["stage"], "awaiting-decision");
+        assert_eq!(paired["intent"]["application"], AGENT_APPLICATION);
+        assert_eq!(paired["relay"]["frames"], 6);
 
         let approved = app.decide(Decision::Approve).expect("approve demo");
         assert_eq!(approved["stage"], "grant-delivered");
@@ -687,12 +892,110 @@ mod tests {
     #[test]
     fn decline_releases_no_payload_and_erases_both_endpoints() {
         let mut app = DemoApp::new();
-        app.start().expect("start demo");
+        let started = app.start().expect("start demo");
+        app.claim(carrier_nameplate(&started), carrier_words(&started))
+            .expect("enter invitation");
         let declined = app.decide(Decision::Decline).expect("decline demo");
         assert_eq!(declined["stage"], "declined");
         assert_eq!(declined["outcome"]["kind"], "declined");
         assert_eq!(declined["outcome"]["allocatorSecretsErased"], true);
         assert_eq!(declined["outcome"]["claimantSecretsErased"], true);
         assert_eq!(declined["relay"]["frames"], 7);
+    }
+
+    #[test]
+    fn invalid_dictionary_word_can_be_corrected_before_online_attempt() {
+        let mut app = DemoApp::new();
+        let started = app.start().expect("start demo");
+
+        assert!(AgentWordPair::recognise("not-a-word", "ability").is_err());
+        let paired = app
+            .claim(carrier_nameplate(&started), carrier_words(&started))
+            .expect("pending invitation remains usable");
+        assert_eq!(paired["stage"], "awaiting-decision");
+    }
+
+    #[test]
+    fn unresolved_nameplate_can_be_corrected_without_consuming_the_invitation() {
+        let mut app = DemoApp::new();
+        let started = app.start().expect("start demo");
+        let nameplate = carrier_nameplate(&started);
+        let wrong_nameplate = if nameplate == 999_999_999 {
+            nameplate - 1
+        } else {
+            nameplate + 1
+        };
+
+        assert!(app.claim(wrong_nameplate, carrier_words(&started)).is_err());
+        let paired = app
+            .claim(nameplate, carrier_words(&started))
+            .expect("corrected nameplate uses pending invitation");
+        assert_eq!(paired["stage"], "awaiting-decision");
+    }
+
+    #[test]
+    fn valid_wrong_words_consume_the_single_attempt_without_revealing_intent() {
+        let mut app = DemoApp::new();
+        let started = app.start().expect("start demo");
+        let displayed = started["carrier"]["words"]
+            .as_array()
+            .expect("displayed word array");
+        let candidate = if displayed[0] == "abandon" && displayed[1] == "ability" {
+            AgentWordPair::recognise("able", "about").expect("alternate valid words")
+        } else {
+            AgentWordPair::recognise("abandon", "ability").expect("valid words")
+        };
+
+        let failed = app
+            .claim(carrier_nameplate(&started), candidate)
+            .expect("consume wrong attempt");
+        assert_eq!(failed["stage"], "failed");
+        assert_eq!(failed["outcome"]["kind"], "failed");
+        assert!(failed["intent"].is_null());
+        assert_eq!(failed["relay"]["frames"], 0);
+        assert!(app
+            .claim(carrier_nameplate(&started), carrier_words(&started))
+            .is_err());
+    }
+
+    #[test]
+    fn claimant_json_accepts_only_canonical_nameplate_and_two_words() {
+        assert_eq!(
+            parse_claim_entry(br#"{"nameplate":"123456","first":"abandon","second":"ability"}"#)
+                .expect("valid claim"),
+            (123_456, "abandon".to_owned(), "ability".to_owned())
+        );
+        assert!(parse_claim_entry(
+            br#"{"nameplate":"123456","first":"abandon","second":"ability","extra":1}"#
+        )
+        .is_err());
+        assert!(parse_claim_entry(
+            br#"{"nameplate":"001234","first":"abandon","second":"ability"}"#
+        )
+        .is_err());
+        assert!(
+            parse_claim_entry(br#"{"nameplate":1234,"first":"abandon","second":"ability"}"#)
+                .is_err()
+        );
+        assert!(parse_claim_entry(br#"["123456","abandon","ability"]"#).is_err());
+    }
+
+    fn carrier_nameplate(state: &Value) -> u32 {
+        state["carrier"]["nameplate"]
+            .as_str()
+            .expect("displayed nameplate")
+            .parse()
+            .expect("canonical numeric nameplate")
+    }
+
+    fn carrier_words(state: &Value) -> AgentWordPair {
+        let words = state["carrier"]["words"]
+            .as_array()
+            .expect("displayed word array");
+        AgentWordPair::recognise(
+            words[0].as_str().expect("first displayed word"),
+            words[1].as_str().expect("second displayed word"),
+        )
+        .expect("generated words are canonical")
     }
 }
