@@ -2,6 +2,7 @@ name: conformance
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -10,26 +11,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-deny 0.20.2
-        env:
-          CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
         run: |
-          archive="$RUNNER_TEMP/cargo-deny.tar.gz"
-          bindir="$RUNNER_TEMP/cargo-deny-bin"
-          curl --proto '=https' --tlsv1.2 -sSfL \
-            https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz \
-            -o "$archive"
-          echo "$CARGO_DENY_SHA256  $archive" | sha256sum --check -
-          mkdir -p "$bindir"
-          tar -xzf "$archive" -C "$bindir" --strip-components=1
-          echo "$bindir" >> "$GITHUB_PATH"
-          "$bindir/cargo-deny" --version
+          SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+          if ! command -v cc >/dev/null 2>&1; then
+            $SUDO apt-get update
+            $SUDO apt-get install -y build-essential pkg-config curl
+          fi
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable --profile minimal
+          cargo +stable install cargo-deny --version 0.20.2 --locked
+          cargo-deny --version
       - name: Advisory, licence, duplicate, and source policy
         run: cargo-deny --all-features --manifest-path ./Cargo.toml check
       - name: Fuzz-harness supply-chain policy
         run: cargo-deny --all-features --manifest-path fuzz/Cargo.toml check
 
   rust:
+    name: rust (${{ matrix.gate }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [static, test, recognition, mutations]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust 1.85 toolchain
@@ -45,13 +53,22 @@ jobs:
           rustup default 1.85.0
           rustc --version
           cargo --version
-      - name: Format
-        run: cargo fmt --check
-      - name: Lint
-        run: cargo clippy --all-targets --all-features -- -D warnings
-      - name: Test
-        run: cargo test --all-targets --all-features
-      - name: Maximum-message recognition work bound
-        run: cargo test --release --test recognition test_023_maximum_adversarial_wire_message_has_bounded_recognition_work -- --exact
-      - name: Required security mutations
-        run: tools/run-mutations.sh
+      - name: Run ${{ matrix.gate }} gate
+        run: |
+          case "${{ matrix.gate }}" in
+            static)
+              cargo fmt --check
+              cargo clippy --all-targets --all-features -- -D warnings
+              ;;
+            test)
+              cargo test --all-targets --all-features
+              ;;
+            recognition)
+              cargo test --release --test recognition \
+                test_023_maximum_adversarial_wire_message_has_bounded_recognition_work \
+                -- --exact
+              ;;
+            mutations)
+              tools/run-mutations.sh
+              ;;
+          esac
