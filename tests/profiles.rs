@@ -232,7 +232,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/.forgejo/workflows/ci.yml"
             ))
             .as_slice(),
-            "2cdc6d8b11b9258e843b826e7836fa906f7f6b77a880e14bdec1cf73a23f016d",
+            "1c80a170d76b5d607201e0228894cf188e367310a7d7f7e2c327812a0a14a6bc",
         ),
     ] {
         assert_eq!(hex::encode(Sha256::digest(bytes)), expected);
