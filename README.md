@@ -52,6 +52,30 @@ The relay owns bounded mailbox state and local abuse control.
 +---------+     +------------+      +-------------+      +------------+     +---------+
 ```
 
+### End-to-end ceremony
+
+The relay queues frames while either peer is offline. Every frame crossing the relay remains opaque to it.
+
+```text
+Allocator                 Blind relay                 Claimant              Person
+    |                          |                          |                    |
+    |-- Allocate ------------->|                          |                    |
+    |<-- mailbox + membership -|                          |                    |
+    |==== invitation through an out-of-band carrier =====>|                    |
+    |                          |<-- Claim / Open ---------|                    |
+    |-- CPace A -------------->|-- deliver or queue ----->|                    |
+    |<-- CPace B --------------|<-------------------------|                    |
+    |-- Finished A ----------->|------------------------->|                    |
+    |<-- Finished B -----------|<-------------------------|                    |
+    |-- sealed intent -------->|------------------------->|-- display -------->|
+    |                          |                          |<- approve/decline -|
+    |<-- sealed decision ------|<-------------------------|                    |
+    |-- sealed payload ------->|------------------------->|-- verify -> grant  |
+    |-- ACK / close ---------->|<-- ACK / close ----------|                    |
+```
+
+Both Finished values verify before the intent appears. Only approval permits an intent-bound payload to reach the application verifier.
+
 The relay sees addresses, timing, mailbox identifiers, counts, sizes, and expiry.
 It never receives the invitation secret or application plaintext, but it can always deny service.
 
