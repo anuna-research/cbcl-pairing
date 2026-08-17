@@ -3,7 +3,7 @@ name = "cbcl-pairing"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
-license = "Apache-2.0 OR MIT"
+license = "Apache-2.0"
 description = "Reusable blind pairing endpoints and relay for SPEC-072"
 
 [lib]
