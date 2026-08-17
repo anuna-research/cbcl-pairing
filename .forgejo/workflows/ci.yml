@@ -37,7 +37,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gate: [static, test, recognition, mutations]
+        gate:
+          - static
+          - test-core
+          - test-service
+          - test-process
+          - test-targets
+          - recognition
+          - mutations
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust 1.85 toolchain
@@ -60,8 +67,26 @@ jobs:
               cargo fmt --check
               cargo clippy --all-targets --all-features -- -D warnings
               ;;
-            test)
-              cargo test --all-targets --all-features
+            test-core)
+              cargo test --lib --all-features
+              for target in assurance_properties cbcl_protocol channel context \
+                cpace dialects endpoint profiles recognition; do
+                cargo test --all-features --test "$target"
+              done
+              ;;
+            test-service)
+              for target in limiter_observability mailbox relay_service \
+                relay_work_bounds storage; do
+                cargo test --all-features --test "$target"
+              done
+              ;;
+            test-process)
+              for target in independent_endpoint relay_process websocket_process; do
+                cargo test --all-features --test "$target"
+              done
+              ;;
+            test-targets)
+              cargo test --bins --examples --all-features
               ;;
             recognition)
               cargo test --release --test recognition \
