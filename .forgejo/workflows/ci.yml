@@ -41,7 +41,9 @@ jobs:
           - static
           - test-core
           - test-service
-          - test-process
+          - test-independent
+          - test-relay-process
+          - test-websocket
           - test-targets
           - recognition
           - mutations
@@ -80,16 +82,20 @@ jobs:
                 cargo test --all-features --test "$target"
               done
               ;;
-            test-process)
+            test-independent)
               if ! command -v python3 >/dev/null 2>&1; then
                 SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
                 $SUDO apt-get update
                 $SUDO apt-get install -y python3
               fi
               python3 --version
-              for target in independent_endpoint relay_process websocket_process; do
-                cargo test --all-features --test "$target"
-              done
+              cargo test --all-features --test independent_endpoint
+              ;;
+            test-relay-process)
+              cargo test --all-features --test relay_process
+              ;;
+            test-websocket)
+              cargo test --all-features --test websocket_process
               ;;
             test-targets)
               cargo test --bins --examples --all-features
