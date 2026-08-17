@@ -224,7 +224,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).as_slice(),
-            "d33713feb62e4edd5359b1ff4a1a9696c6a5bd1407fea8b64d1a013b8f5331f3",
+            "b71ff778cb624ba855c8125d38939283fb55b55e1af50375f02ef582d729d84a",
         ),
         (
             include_bytes!(concat!(
@@ -232,7 +232,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/.forgejo/workflows/ci.yml"
             ))
             .as_slice(),
-            "1c80a170d76b5d607201e0228894cf188e367310a7d7f7e2c327812a0a14a6bc",
+            "04e9076fcfc6d89d8be1139f7a50a9bccd4494af833bef2a112ef3f17411ce44",
         ),
     ] {
         assert_eq!(hex::encode(Sha256::digest(bytes)), expected);

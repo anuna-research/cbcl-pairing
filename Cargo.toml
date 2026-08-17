@@ -20,7 +20,7 @@ aes-gcm = { version = "=0.11.0", default-features = false, features = ["aes", "a
 bip39 = { version = "=2.2.2", default-features = false, features = ["std"] }
 cbcl-core = { version = "=0.1.0", git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
 cbcl-parser = { version = "=0.1.0", git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
-cbor2 = "=1.1.4"
+cbor2 = "=1.1.0"
 cddl-cat = { version = "=0.7.1", default-features = false, features = ["ciborium"] }
 ciborium = "=0.2.2"
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["alloc", "fast", "zeroize"] }
