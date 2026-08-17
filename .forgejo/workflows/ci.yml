@@ -81,6 +81,12 @@ jobs:
               done
               ;;
             test-process)
+              if ! command -v python3 >/dev/null 2>&1; then
+                SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+                $SUDO apt-get update
+                $SUDO apt-get install -y python3
+              fi
+              python3 --version
               for target in independent_endpoint relay_process websocket_process; do
                 cargo test --all-features --test "$target"
               done
