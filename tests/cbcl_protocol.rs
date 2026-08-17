@@ -556,3 +556,279 @@ fn both_finished_controls_are_accepted_after_the_fan_in() {
     }
     assert_eq!(monitor.stored_count(), 4);
 }
+
+/// Build a role opener for an arbitrary ceremony string.
+///
+/// `build_session_opener` validates the ceremony itself, so it cannot produce
+/// the malformed-ceremony inputs the tests below need. This mirrors its output
+/// exactly while leaving the ceremony unchecked.
+fn opener_for_ceremony(
+    allocator: &CeremonySigningKey,
+    claimant: &CeremonyKeyId,
+    ceremony: &str,
+) -> Vec<u8> {
+    opener_from_inner(
+        allocator,
+        claimant,
+        &format!("(hello :thread \"{ceremony}\" :caused-by begin)"),
+    )
+}
+
+/// Wrap an arbitrary inner control in an otherwise-exact role opener.
+fn opener_from_inner(
+    allocator: &CeremonySigningKey,
+    claimant: &CeremonyKeyId,
+    inner: &str,
+) -> Vec<u8> {
+    let hello: Message =
+        Message::try_from(&inner.parse::<SExpr>().expect("inner syntax")).expect("inner message");
+    let signed = allocator.sign_message(hello).expect("sign inner");
+    let bindings: SExpr = format!(
+        "((allocator {}) (claimant {}))",
+        allocator.key_id().as_str(),
+        claimant.as_str()
+    )
+    .parse()
+    .expect("bindings");
+    encode_control(&Message::Wrapped {
+        wrapper: WrapperType::WithRoles,
+        params: vec![
+            bindings,
+            SExpr::Atom(Atom::Keyword("dialect".into())),
+            SExpr::Atom(Atom::Symbol(SESSION_DIALECT_HASH.into())),
+        ],
+        content: Box::new(signed),
+    })
+    .expect("canonical control")
+}
+
+#[test]
+fn ceremony_identifier_must_be_exactly_sixty_four_lowercase_hex_digits() {
+    let (allocator, claimant) = keys();
+    let allocator_id = allocator.key_id();
+    let claimant_id = claimant.key_id();
+    let valid = ceremony_id(INVITATION);
+
+    // Positive control. Without this the negative cases below would still pass
+    // if `opener_for_ceremony` produced an opener that were rejected for some
+    // unrelated reason, which would prove nothing about the ceremony check.
+    let control = opener_for_ceremony(&allocator, &claimant_id, &valid);
+    let (_, admission) = SessionMonitor::open_for_ceremony(
+        &valid,
+        PairingRole::Allocator,
+        &allocator_id,
+        &claimant_id,
+        &control,
+    )
+    .expect("the exact ceremony opens the session");
+    assert_eq!(admission.verdict(), ProtocolVerdict::Valid);
+
+    let head = &valid[..63];
+    for bad in [
+        head.to_owned(),     // 63 digits: one short.
+        format!("{head}A"),  // Uppercase is not lowercase hex.
+        format!("{head}z"),  // Outside the hex alphabet entirely.
+        format!("{valid}0"), // 65 digits: one long.
+        "".to_owned(),       // Empty.
+    ] {
+        let control = opener_for_ceremony(&allocator, &claimant_id, &bad);
+        assert_eq!(
+            SessionMonitor::open_for_ceremony(
+                &bad,
+                PairingRole::Allocator,
+                &allocator_id,
+                &claimant_id,
+                &control,
+            )
+            .unwrap_err(),
+            ProtocolError::Thread,
+            "ceremony {bad:?} must be refused as a thread identifier"
+        );
+    }
+}
+
+#[test]
+fn control_encoding_accepts_the_maximum_length_and_refuses_one_octet_more() {
+    const MAX_CONTROL_OCTETS: usize = 2_048;
+    let ceremony = ceremony_id(INVITATION);
+
+    // Each additional padding character adds exactly one octet to the canonical
+    // text, so measure the fixed overhead once and then solve for the padding
+    // that lands precisely on the limit.
+    let encoded_len = |pad: usize| -> Result<usize, ProtocolError> {
+        let message: Message = Message::try_from(
+            &format!(
+                "(hello (\"{}\") :thread \"{ceremony}\" :caused-by begin)",
+                "x".repeat(pad)
+            )
+            .parse::<SExpr>()
+            .expect("hello syntax"),
+        )
+        .expect("hello message");
+        encode_control(&message).map(|bytes| bytes.len())
+    };
+
+    let base = encoded_len(0).expect("short control encodes");
+    let exact_pad = MAX_CONTROL_OCTETS - base;
+
+    let at_limit = encoded_len(exact_pad).expect("a control of exactly the maximum length encodes");
+    assert_eq!(at_limit, MAX_CONTROL_OCTETS);
+
+    assert_eq!(
+        encoded_len(exact_pad + 1).unwrap_err(),
+        ProtocolError::MalformedControl,
+        "one octet past the maximum must be refused"
+    );
+}
+
+#[test]
+fn the_role_opener_admits_only_the_exact_inert_hello() {
+    let (allocator, claimant) = keys();
+    let allocator_id = allocator.key_id();
+    let claimant_id = claimant.key_id();
+    let ceremony = ceremony_id(INVITATION);
+    let other = ceremony_id(b"a different invitation");
+
+    // Positive control: the exact inert hello opens the session.
+    let exact = format!("(hello :thread \"{ceremony}\" :caused-by begin)");
+    let control = opener_from_inner(&allocator, &claimant_id, &exact);
+    SessionMonitor::open_for_ceremony(
+        &ceremony,
+        PairingRole::Allocator,
+        &allocator_id,
+        &claimant_id,
+        &control,
+    )
+    .expect("the exact inert hello opens the session");
+
+    // Each case departs from the exact form in exactly one way, so each one
+    // pins a single clause of the opener check.
+    for (why, inner) in [
+        (
+            "a non-hello performative",
+            format!("(pairing-intent :thread \"{ceremony}\" :caused-by begin)"),
+        ),
+        (
+            "an addressed recipient",
+            format!(
+                "(hello :to {} :thread \"{ceremony}\" :caused-by begin)",
+                claimant_id.as_str()
+            ),
+        ),
+        (
+            "a non-empty body",
+            format!("(hello (\"payload\") :thread \"{ceremony}\" :caused-by begin)"),
+        ),
+        (
+            "a foreign thread",
+            format!("(hello :thread \"{other}\" :caused-by begin)"),
+        ),
+        ("an absent thread", "(hello :caused-by begin)".to_owned()),
+        (
+            "a declared sender",
+            format!(
+                "(hello :from {} :thread \"{ceremony}\" :caused-by begin)",
+                allocator_id.as_str()
+            ),
+        ),
+        (
+            "an absent causal root",
+            format!("(hello :thread \"{ceremony}\")"),
+        ),
+    ] {
+        let control = opener_from_inner(&allocator, &claimant_id, &inner);
+        assert_eq!(
+            SessionMonitor::open_for_ceremony(
+                &ceremony,
+                PairingRole::Allocator,
+                &allocator_id,
+                &claimant_id,
+                &control,
+            )
+            .unwrap_err(),
+            ProtocolError::RoleOpener,
+            "an opener with {why} must be refused"
+        );
+    }
+}
+
+#[test]
+fn the_session_store_counts_every_distinct_admitted_control() {
+    let (mut monitor, allocator, _claimant, _allocator_id, claimant_id) =
+        opened_session(PairingRole::Allocator);
+    assert_eq!(monitor.stored_count(), 1, "the opener is the only root");
+
+    let ceremony = ceremony_id(INVITATION);
+    let intent_body = b"canonical pairing intent";
+    let intent = build_session_control(
+        &allocator,
+        SessionPerformative::Intent,
+        &ceremony,
+        &claimant_id,
+        intent_body,
+        CausedBy::Single(monitor.root_hash().to_owned()),
+    )
+    .expect("intent");
+    assert_eq!(
+        monitor
+            .admit(SessionPerformative::Intent, &intent, intent_body)
+            .expect("valid intent")
+            .verdict(),
+        ProtocolVerdict::Valid
+    );
+    assert_eq!(
+        monitor.stored_count(),
+        2,
+        "the admitted intent joins the opener in the store"
+    );
+}
+
+#[test]
+fn each_dialect_source_is_pinned_independently() {
+    // The exact pair installs.
+    PairingDialects::install_sources(BOOTSTRAP_DIALECT_SOURCE, SESSION_DIALECT_SOURCE)
+        .expect("exact sources install");
+
+    // Corrupting either source alone must be refused. Testing only one of them
+    // leaves the other's pin unproven.
+    let bootstrap_mutated = BOOTSTRAP_DIALECT_SOURCE.replacen("max-depth 8", "max-depth 0", 1);
+    assert_ne!(bootstrap_mutated, BOOTSTRAP_DIALECT_SOURCE);
+    assert_eq!(
+        PairingDialects::install_sources(&bootstrap_mutated, SESSION_DIALECT_SOURCE).unwrap_err(),
+        ProtocolError::Dialect,
+        "a corrupted bootstrap source must be refused"
+    );
+
+    let session_mutated = format!("{SESSION_DIALECT_SOURCE} ");
+    assert_ne!(session_mutated, SESSION_DIALECT_SOURCE);
+    assert_eq!(
+        PairingDialects::install_sources(BOOTSTRAP_DIALECT_SOURCE, &session_mutated).unwrap_err(),
+        ProtocolError::Dialect,
+        "a corrupted session source must be refused"
+    );
+}
+
+#[test]
+fn control_nesting_is_accepted_at_the_maximum_depth_and_refused_one_deeper() {
+    let ceremony = ceremony_id(INVITATION);
+    // The canonical text nests one level for the message and one for the body,
+    // so `nesting` extra lists put the total at `nesting + 2`. The dialect
+    // bounds control depth at 8, making 6 the deepest accepted nesting.
+    let control_at = |nesting: usize| -> Result<Vec<u8>, ProtocolError> {
+        let body = format!("{}\"x\"{}", "(".repeat(nesting), ")".repeat(nesting));
+        let message: Message = Message::try_from(
+            &format!("(hello ({body}) :thread \"{ceremony}\" :caused-by begin)")
+                .parse::<SExpr>()
+                .expect("nested syntax"),
+        )
+        .expect("nested message");
+        encode_control(&message)
+    };
+
+    control_at(6).expect("a control at exactly the maximum depth encodes");
+    assert_eq!(
+        control_at(7).unwrap_err(),
+        ProtocolError::MalformedControl,
+        "one level past the maximum depth must be refused"
+    );
+}

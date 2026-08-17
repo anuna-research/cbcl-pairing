@@ -5,3 +5,7 @@
 /.idea/
 /.vscode/
 *.profraw
+
+# cargo-mutants sweep output (regenerate with tools/run-mutant-sweep.sh)
+/mutants.out/
+/mutants.out.old/

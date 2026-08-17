@@ -33,8 +33,12 @@ credential data. It sees:
   in mailbox state.
 
 TLS hides transport data from network observers, not from the relay operator.
-Traffic analysis, operator compromise, denial of service, intentional crowding,
-and invitation consumption remain possible.
+Traffic analysis, operator compromise, intentional crowding, invitation
+consumption, and a malicious operator deliberately withholding service remain
+possible. Anonymous-client work amplification is not accepted by that operator
+denial statement: recognition, unrelated relay work, clock reversal, and
+limiter-key diversity are bounded by
+[NFR-009 through NFR-012](../specs/SPEC-001-reusable-blind-pairing.md#nfr-009-recognition-work-bound).
 
 ## Endpoint trust boundary
 

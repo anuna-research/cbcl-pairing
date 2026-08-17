@@ -24,9 +24,9 @@ fn config(entry_cap: usize) -> LimiterConfig {
 
 #[test]
 fn test_014_logs_and_metrics_have_only_closed_non_sensitive_dimensions() {
-    let raw_address = b"203.0.113.42:443";
+    let raw_address = b"203.0.113.42";
     let sensitive_values = [
-        "203.0.113.42:443",
+        "203.0.113.42",
         "123456789",
         "membership-token",
         "anuna.io/agent/v1",
@@ -61,6 +61,7 @@ fn test_014_logs_and_metrics_have_only_closed_non_sensitive_dimensions() {
         open_mailboxes: 80,
         queue_bytes: 799,
         limiter_entries: 8,
+        limiter_clock_reversals: 0,
     });
     let metrics = observability.metrics();
     assert_eq!(metrics.operations.len(), cases.len());
@@ -76,7 +77,7 @@ fn test_014_logs_and_metrics_have_only_closed_non_sensitive_dimensions() {
 
 #[test]
 fn test_015_keyed_dimensions_have_independent_budgets_and_fixed_cooldown() {
-    let address = b"198.51.100.7:8443";
+    let address = b"198.51.100.7";
     let mut limiter = Limiter::new(OPERATOR_KEY, config(32)).expect("limiter constructs");
 
     assert_eq!(
@@ -115,7 +116,9 @@ fn test_015_keyed_dimensions_have_independent_budgets_and_fixed_cooldown() {
         .expect("put dimension")
         .1;
     let mut expected = Hmac::<Sha256>::new_from_slice(&OPERATOR_KEY).expect("HMAC key");
-    expected.update(address);
+    expected.update(b"cbcl-pairing-peer/v1");
+    expected.update(&[4]);
+    expected.update(&[198, 51, 100, 7]);
     assert_eq!(
         put_key.into_bytes().as_slice(),
         expected.finalize().into_bytes().as_slice()
@@ -146,16 +149,16 @@ fn test_015_every_operation_is_limited_and_entry_cap_survives_churn() {
         );
     }
     assert_eq!(limiter.snapshot().entry_count, Operation::ALL.len());
-    assert_eq!(
-        limiter.check(Operation::Bind, b"192.0.2.250:443", 25),
-        Ok(LimitDecision::AtCapacity)
-    );
+    assert!(matches!(
+        limiter.check(Operation::Bind, b"192.0.2.250", 25),
+        Ok(LimitDecision::Allowed { .. })
+    ));
     assert_eq!(limiter.snapshot().entry_count, Operation::ALL.len());
 
-    assert_eq!(limiter.sweep(302).expect("cooldowns remain"), 0);
+    assert_eq!(limiter.sweep(302).expect("new dimension expires"), 1);
     assert_eq!(
         limiter.sweep(334).expect("inactive entries sweep"),
-        Operation::ALL.len()
+        Operation::ALL.len() - 1
     );
     assert_eq!(limiter.snapshot().entry_count, 0);
     assert!(matches!(
@@ -171,12 +174,12 @@ fn test_015_periodic_sweep_runs_before_capacity_refusal() {
         limiter.check(Operation::Ping, b"192.0.2.1:1", 0),
         Ok(LimitDecision::Allowed { .. })
     ));
-    assert_eq!(
-        limiter.check(Operation::Ping, b"192.0.2.2:1", 4),
-        Ok(LimitDecision::AtCapacity)
-    );
     assert!(matches!(
-        limiter.check(Operation::Ping, b"192.0.2.2:1", 10),
+        limiter.check(Operation::Ping, b"192.0.2.2", 4),
+        Ok(LimitDecision::Allowed { .. })
+    ));
+    assert!(matches!(
+        limiter.check(Operation::Ping, b"192.0.2.2", 10),
         Ok(LimitDecision::Allowed { .. })
     ));
     assert_eq!(limiter.snapshot().entry_count, 1);
@@ -198,4 +201,71 @@ fn test_017_operator_keys_separate_peer_pseudonyms() {
     assert_ne!(first_key, second_key);
     assert_eq!(format!("{first_key:?}"), "PeerKey(REDACTED)");
     assert_eq!(format!("{second_key:?}"), "PeerKey(REDACTED)");
+}
+
+#[test]
+fn test_025_backwards_time_is_clamped_without_refusing_admission() {
+    let mut limiter = Limiter::new(OPERATOR_KEY, config(8)).expect("limiter constructs");
+    assert!(matches!(
+        limiter.check(Operation::Bind, b"192.0.2.1", 1_000),
+        Ok(LimitDecision::Allowed { .. })
+    ));
+    assert!(matches!(
+        limiter.check(Operation::Ping, b"192.0.2.1", 970),
+        Ok(LimitDecision::Allowed { .. })
+    ));
+    assert_eq!(limiter.snapshot().clock_reversals, 1);
+}
+
+#[test]
+fn test_026_ipv6_prefixes_and_lru_replacement_preserve_admission() {
+    let roomy = LimiterConfig::new(
+        OperationPolicy {
+            limit: 100,
+            window_seconds: 60,
+        },
+        8,
+        5,
+    );
+    let mut aggregated = Limiter::new(OPERATOR_KEY, roomy).expect("limiter constructs");
+    for address in ["2001:db8:1:2::1", "2001:db8:1:2:ffff::99"] {
+        assert!(matches!(
+            aggregated.check(Operation::Bind, address.as_bytes(), 10),
+            Ok(LimitDecision::Allowed { .. })
+        ));
+    }
+    assert_eq!(aggregated.snapshot().entry_count, 1);
+
+    let mut bounded = Limiter::new(OPERATOR_KEY, config(2)).expect("limiter constructs");
+    assert!(matches!(
+        bounded.check(Operation::Bind, b"192.0.2.1", 1),
+        Ok(LimitDecision::Allowed { .. })
+    ));
+    let first_key = bounded.snapshot().dimensions[0].1;
+    assert!(matches!(
+        bounded.check(Operation::Bind, b"192.0.2.2", 2),
+        Ok(LimitDecision::Allowed { .. })
+    ));
+    let second_key = bounded
+        .snapshot()
+        .dimensions
+        .into_iter()
+        .find_map(|(_, key)| (key != first_key).then_some(key))
+        .expect("second peer key");
+    assert!(matches!(
+        bounded.check(Operation::Bind, b"192.0.2.1", 3),
+        Ok(LimitDecision::Allowed { .. })
+    ));
+    assert!(matches!(
+        bounded.check(Operation::Bind, b"192.0.2.3", 4),
+        Ok(LimitDecision::Allowed { .. })
+    ));
+    let snapshot = bounded.snapshot();
+    assert_eq!(snapshot.entry_count, 2);
+    assert_eq!(snapshot.capacity_evictions, 1);
+    assert!(snapshot.dimensions.iter().any(|(_, key)| *key == first_key));
+    assert!(!snapshot
+        .dimensions
+        .iter()
+        .any(|(_, key)| *key == second_key));
 }

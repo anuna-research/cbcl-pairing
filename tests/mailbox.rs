@@ -170,6 +170,25 @@ fn test_003_third_distinct_claim_crowds_and_allocates_no_membership() {
 }
 
 #[test]
+fn test_029_existing_claimant_hash_cannot_reclaim() {
+    let mut state = Some(allocated());
+    claim(&mut state);
+    let before = state.as_ref().expect("state").snapshot();
+
+    assert_eq!(
+        transition(
+            state.as_ref().expect("state"),
+            NOW + 1,
+            MailboxCommand::Claim {
+                claimant_hash: hash(0xb2),
+            },
+        ),
+        Err(MailboxError::MembershipCollision)
+    );
+    assert_eq!(state.as_ref().expect("state").snapshot(), before);
+}
+
+#[test]
 fn test_004_sequence_retries_are_idempotent_and_conflicts_are_terminal() {
     let mut state = Some(allocated());
     claim(&mut state);
@@ -210,7 +229,7 @@ fn test_004_sequence_retries_are_idempotent_and_conflicts_are_terminal() {
         MailboxCommand::Put {
             sender: Membership::Allocator,
             seq: 0,
-            body: vec![9],
+            body: vec![9, 9, 9],
         },
     );
     assert_eq!(

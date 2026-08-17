@@ -281,6 +281,22 @@ The mutation command makes seven deliberately insecure copies and succeeds only
 when every targeted test kills its mutant. The fuzz command uses the installed
 nightly toolchain and `cargo-fuzz`; it does not retain corpora in Git.
 
+A broader mutation sweep is available for exploratory use. It is not a gate and
+does not run in CI.
+
+```sh
+cargo install cargo-mutants --locked
+tools/run-mutant-sweep.sh --jobs 6
+```
+
+The sweep enumerates every mutant `cargo-mutants` can construct across the
+library and writes its verdicts to `mutants.out/`, which Git ignores. Its
+purpose is to find behaviour no test observes; a survivor listed in
+`mutants.out/missed.txt` is a candidate for promotion into a curated patch under
+`mutations/`, not a build failure. Configuration lives in `.cargo/mutants.toml`,
+which excludes the binary entry points and example because their mutants are
+reachable only through process-spawning tests.
+
 ## Documentation
 
 - [Repository-local SPEC-001](specs/SPEC-001-reusable-blind-pairing.md)

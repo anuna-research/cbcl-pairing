@@ -15,7 +15,7 @@ pub const MAX_FRAMES_PER_MEMBERSHIP: usize = 16;
 pub const MAX_FRAME_BODY_BYTES: usize = 69_632;
 
 /// Hash of a relay-issued membership token.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct MembershipHash([u8; 32]);
 
 impl MembershipHash {
@@ -182,6 +182,7 @@ pub struct Mailbox {
     status: MailboxStatus,
     allocator: MemberState,
     claimant: Option<MemberState>,
+    queue_bytes: u64,
 }
 
 /// One sequence's privacy-bounded inspectable state.
@@ -311,7 +312,20 @@ impl Mailbox {
                 frames: Vec::new(),
             },
             claimant: None,
+            queue_bytes: 0,
         })
+    }
+
+    /// Return the direct mailbox identifier.
+    #[must_use]
+    pub const fn mailbox_id(&self) -> [u8; 32] {
+        self.mailbox_id
+    }
+
+    /// Return the optional nameplate alias.
+    #[must_use]
+    pub const fn nameplate(&self) -> Option<u32> {
+        self.nameplate
     }
 
     /// Return the original absolute expiry.
@@ -324,6 +338,17 @@ impl Mailbox {
     #[must_use]
     pub const fn status(&self) -> MailboxStatus {
         self.status
+    }
+
+    /// Return queued opaque-body bytes without copying bodies.
+    #[must_use]
+    pub const fn queue_bytes(&self) -> u64 {
+        self.queue_bytes
+    }
+
+    pub(crate) fn membership_hashes(&self) -> impl Iterator<Item = MembershipHash> + '_ {
+        std::iter::once(self.allocator.hash)
+            .chain(self.claimant.as_ref().map(|claimant| claimant.hash))
     }
 
     /// Return a privacy-bounded snapshot for persistence and conformance tests.
@@ -429,6 +454,13 @@ impl Mailbox {
         {
             return Err(MailboxError::InvalidSnapshot);
         }
+        let queue_bytes = allocator
+            .frames
+            .iter()
+            .chain(claimant.iter().flat_map(|claimant| claimant.frames.iter()))
+            .filter(|frame| frame.body.is_some())
+            .map(|frame| frame.body_len as u64)
+            .sum();
         Ok(Self {
             mailbox_id: snapshot.mailbox_id,
             nameplate: snapshot.nameplate,
@@ -436,6 +468,7 @@ impl Mailbox {
             status: snapshot.status,
             allocator,
             claimant,
+            queue_bytes,
         })
     }
 
@@ -475,6 +508,10 @@ impl Mailbox {
             if let Some(member) = member {
                 for frame in &mut member.frames {
                     if frame.body.take().is_some() {
+                        self.queue_bytes = self
+                            .queue_bytes
+                            .checked_sub(frame.body_len as u64)
+                            .expect("queued body accounting remains exact");
                         effects.push(MailboxEffect::BodyDeleted {
                             owner,
                             seq: frame.seq,
@@ -532,13 +569,9 @@ pub fn transition(
                         }],
                     })
                 }
-                Some(claimant) if claimant.hash == claimant_hash => Ok(MailboxTransition {
-                    state: Some(next),
-                    effects: vec![MailboxEffect::Claimed {
-                        membership: Membership::Claimant,
-                        expires_at: state.expires_at,
-                    }],
-                }),
+                Some(claimant) if claimant.hash == claimant_hash => {
+                    Err(MailboxError::MembershipCollision)
+                }
                 Some(_) => Ok(next.terminate(CloseReason::Crowded)),
             }
         }
@@ -608,6 +641,10 @@ pub fn transition(
                 body: Some(body.clone()),
             });
             member.next_seq += 1;
+            next.queue_bytes = next
+                .queue_bytes
+                .checked_add(body.len() as u64)
+                .expect("bounded queue-byte accounting cannot overflow");
 
             let mut effects = vec![MailboxEffect::Stored {
                 sender,
@@ -639,7 +676,9 @@ pub fn transition(
                 .iter_mut()
                 .find(|frame| frame.seq == peer_seq)
                 .ok_or(MailboxError::UnknownSequence)?;
-            let effects = if frame.body.take().is_some() {
+            let removed = frame.body.take().is_some();
+            let body_len = frame.body_len as u64;
+            let effects = if removed {
                 vec![MailboxEffect::BodyDeleted {
                     owner,
                     seq: peer_seq,
@@ -647,6 +686,12 @@ pub fn transition(
             } else {
                 Vec::new()
             };
+            if removed {
+                next.queue_bytes = next
+                    .queue_bytes
+                    .checked_sub(body_len)
+                    .expect("queued body accounting remains exact");
+            }
             Ok(MailboxTransition {
                 state: Some(next),
                 effects,

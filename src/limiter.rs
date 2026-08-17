@@ -1,6 +1,9 @@
 //! Pure operator-keyed, bounded mailbox-operation limiter.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    net::IpAddr,
+};
 
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
@@ -133,8 +136,6 @@ pub enum LimitDecision {
         /// Absolute second at which admission may resume.
         retry_at: u64,
     },
-    /// A new dimension was refused at the configured hard cap.
-    AtCapacity,
 }
 
 /// Inspectable limiter state containing only pseudonymous dimensions.
@@ -144,6 +145,10 @@ pub struct LimiterSnapshot {
     pub entry_count: usize,
     /// Pseudonymous dimensions in stable order.
     pub dimensions: Vec<(Operation, PeerKey)>,
+    /// Backwards clock observations clamped to the high-water mark.
+    pub clock_reversals: u64,
+    /// Least-recently-used dimensions removed at the hard cap.
+    pub capacity_evictions: u64,
 }
 
 /// Limiter construction or clock error.
@@ -151,8 +156,6 @@ pub struct LimiterSnapshot {
 pub enum LimiterError {
     /// A policy limit, window, cap, or sweep interval is zero.
     InvalidConfiguration,
-    /// Supplied time moved backwards.
-    TimeReversal,
     /// Cooldown expiry overflowed absolute time.
     TimeOverflow,
     /// Canonical peer address input was empty.
@@ -171,6 +174,7 @@ impl std::error::Error for LimiterError {}
 struct Entry {
     attempts: VecDeque<u64>,
     cooldown_until: Option<u64>,
+    recency: u64,
 }
 
 /// One shared limiter across every mailbox operation.
@@ -178,8 +182,12 @@ pub struct Limiter {
     operator_key: [u8; 32],
     config: LimiterConfig,
     entries: BTreeMap<(Operation, PeerKey), Entry>,
+    recency: BTreeSet<(u64, Operation, PeerKey)>,
+    next_recency: u64,
     last_now: Option<u64>,
     last_sweep: Option<u64>,
+    clock_reversals: u64,
+    capacity_evictions: u64,
 }
 
 impl std::fmt::Debug for Limiter {
@@ -211,8 +219,12 @@ impl Limiter {
             operator_key,
             config,
             entries: BTreeMap::new(),
+            recency: BTreeSet::new(),
+            next_recency: 0,
             last_now: None,
             last_sweep: None,
+            clock_reversals: 0,
+            capacity_evictions: 0,
         })
     }
 
@@ -226,7 +238,7 @@ impl Limiter {
         if canonical_peer_address.is_empty() {
             return Err(LimiterError::EmptyPeerAddress);
         }
-        self.observe_time(now)?;
+        let now = self.observe_time(now);
         if self
             .last_sweep
             .is_none_or(|last| now.saturating_sub(last) >= self.config.sweep_interval_seconds)
@@ -238,7 +250,12 @@ impl Limiter {
         let peer_key = self.peer_key(canonical_peer_address);
         let dimension = (operation, peer_key);
         let policy = self.config.policies[operation.index()];
-        if let Some(entry) = self.entries.get_mut(&dimension) {
+        if self.entries.contains_key(&dimension) {
+            self.touch(dimension)?;
+            let entry = self
+                .entries
+                .get_mut(&dimension)
+                .expect("touched limiter dimension remains present");
             if let Some(retry_at) = entry.cooldown_until {
                 if now < retry_at {
                     return Ok(LimitDecision::Cooldown { retry_at });
@@ -261,8 +278,9 @@ impl Limiter {
         }
 
         if self.entries.len() >= self.config.entry_cap {
-            return Ok(LimitDecision::AtCapacity);
+            self.evict_lru();
         }
+        let recency = self.take_recency()?;
         let mut attempts = VecDeque::new();
         attempts.push_back(now);
         self.entries.insert(
@@ -270,8 +288,10 @@ impl Limiter {
             Entry {
                 attempts,
                 cooldown_until: None,
+                recency,
             },
         );
+        self.recency.insert((recency, operation, peer_key));
         Ok(LimitDecision::Allowed {
             remaining: policy.limit - 1,
         })
@@ -279,7 +299,7 @@ impl Limiter {
 
     /// Periodically remove inactive dimensions.
     pub fn sweep(&mut self, now: u64) -> Result<usize, LimiterError> {
-        self.observe_time(now)?;
+        let now = self.observe_time(now);
         let removed = self.sweep_inner(now);
         self.last_sweep = Some(now);
         Ok(removed)
@@ -291,39 +311,133 @@ impl Limiter {
         LimiterSnapshot {
             entry_count: self.entries.len(),
             dimensions: self.entries.keys().copied().collect(),
+            clock_reversals: self.clock_reversals,
+            capacity_evictions: self.capacity_evictions,
         }
     }
 
-    fn observe_time(&mut self, now: u64) -> Result<(), LimiterError> {
-        if self.last_now.is_some_and(|last| now < last) {
-            return Err(LimiterError::TimeReversal);
+    /// Return the current dimension count without allocating a snapshot.
+    #[must_use]
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Return the aggregate number of clamped backwards clock observations.
+    #[must_use]
+    pub const fn clock_reversals(&self) -> u64 {
+        self.clock_reversals
+    }
+
+    pub(crate) fn sweep_if_due(&mut self, now: u64) -> Result<usize, LimiterError> {
+        let now = self.observe_time(now);
+        if self
+            .last_sweep
+            .is_some_and(|last| now.saturating_sub(last) < self.config.sweep_interval_seconds)
+        {
+            return Ok(0);
         }
-        self.last_now = Some(now);
-        Ok(())
+        let removed = self.sweep_inner(now);
+        self.last_sweep = Some(now);
+        Ok(removed)
+    }
+
+    fn observe_time(&mut self, now: u64) -> u64 {
+        let effective = self.last_now.map_or(now, |last| last.max(now));
+        if effective != now {
+            self.clock_reversals = self.clock_reversals.saturating_add(1);
+        }
+        self.last_now = Some(effective);
+        effective
     }
 
     fn peer_key(&self, canonical_peer_address: &[u8]) -> PeerKey {
         type HmacSha256 = Hmac<Sha256>;
         let mut mac = HmacSha256::new_from_slice(&self.operator_key)
             .expect("HMAC accepts every fixed-size key");
-        mac.update(canonical_peer_address);
+        mac.update(b"cbcl-pairing-peer/v1");
+        match std::str::from_utf8(canonical_peer_address)
+            .ok()
+            .and_then(|address| address.parse::<IpAddr>().ok())
+        {
+            Some(IpAddr::V4(address)) => {
+                mac.update(&[4]);
+                mac.update(&address.octets());
+            }
+            Some(IpAddr::V6(address)) => {
+                if let Some(address) = address.to_ipv4_mapped() {
+                    mac.update(&[4]);
+                    mac.update(&address.octets());
+                } else {
+                    mac.update(&[6]);
+                    mac.update(&address.octets()[..8]);
+                }
+            }
+            None => {
+                mac.update(&[0]);
+                mac.update(canonical_peer_address);
+            }
+        }
         PeerKey(mac.finalize().into_bytes().into())
     }
 
+    fn take_recency(&mut self) -> Result<u64, LimiterError> {
+        let recency = self.next_recency;
+        self.next_recency = self
+            .next_recency
+            .checked_add(1)
+            .ok_or(LimiterError::TimeOverflow)?;
+        Ok(recency)
+    }
+
+    fn touch(&mut self, dimension: (Operation, PeerKey)) -> Result<(), LimiterError> {
+        let previous = self
+            .entries
+            .get(&dimension)
+            .expect("existing limiter dimension")
+            .recency;
+        self.recency.remove(&(previous, dimension.0, dimension.1));
+        let recency = self.take_recency()?;
+        self.entries
+            .get_mut(&dimension)
+            .expect("existing limiter dimension")
+            .recency = recency;
+        self.recency.insert((recency, dimension.0, dimension.1));
+        Ok(())
+    }
+
+    fn evict_lru(&mut self) {
+        let Some(victim) = self.recency.first().copied() else {
+            return;
+        };
+        self.recency.remove(&victim);
+        self.entries.remove(&(victim.1, victim.2));
+        self.capacity_evictions = self.capacity_evictions.saturating_add(1);
+    }
+
     fn sweep_inner(&mut self, now: u64) -> usize {
-        let before = self.entries.len();
         let policies = self.config.policies;
-        self.entries.retain(|(operation, _), entry| {
-            if entry.cooldown_until.is_some_and(|retry_at| now >= retry_at) {
-                return false;
-            }
-            if entry.cooldown_until.is_some() {
-                return true;
-            }
-            prune_attempts(entry, policies[operation.index()].window_seconds, now);
-            !entry.attempts.is_empty()
-        });
-        before - self.entries.len()
+        let removed: Vec<_> = self
+            .entries
+            .iter_mut()
+            .filter_map(|(dimension, entry)| {
+                if entry.cooldown_until.is_some_and(|retry_at| now >= retry_at) {
+                    return Some((*dimension, entry.recency));
+                }
+                if entry.cooldown_until.is_some() {
+                    return None;
+                }
+                prune_attempts(entry, policies[dimension.0.index()].window_seconds, now);
+                entry
+                    .attempts
+                    .is_empty()
+                    .then_some((*dimension, entry.recency))
+            })
+            .collect();
+        for (dimension, recency) in &removed {
+            self.entries.remove(dimension);
+            self.recency.remove(&(*recency, dimension.0, dimension.1));
+        }
+        removed.len()
     }
 }
 

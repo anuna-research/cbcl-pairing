@@ -98,6 +98,8 @@ pub struct RelayGauges {
     pub queue_bytes: u64,
     /// `pairing_mailbox_limiter_entries`.
     pub limiter_entries: u64,
+    /// `pairing_limiter_clock_reversals_total`.
+    pub limiter_clock_reversals: u64,
 }
 
 /// Closed alerts that fire at 80 percent of configured caps.
@@ -141,6 +143,7 @@ impl RelayObservability {
                 open_mailboxes: 0,
                 queue_bytes: 0,
                 limiter_entries: 0,
+                limiter_clock_reversals: 0,
             },
         }
     }

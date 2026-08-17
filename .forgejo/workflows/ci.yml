@@ -2,36 +2,112 @@ name: conformance
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
   supply-chain:
-    runs-on: docker
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install cargo-deny 0.20.2
+        run: |
+          SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+          if ! command -v cc >/dev/null 2>&1; then
+            $SUDO apt-get update
+            $SUDO apt-get install -y build-essential pkg-config curl
+          fi
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable --profile minimal
+          cargo +stable install cargo-deny --version 0.20.2 --locked
+          cargo-deny --version
       - name: Advisory, licence, duplicate, and source policy
-        uses: EmbarkStudios/cargo-deny-action@v2.1.1
-        with:
-          command: check
-          arguments: --all-features
+        run: cargo-deny --all-features --manifest-path ./Cargo.toml check
       - name: Fuzz-harness supply-chain policy
-        uses: EmbarkStudios/cargo-deny-action@v2.1.1
-        with:
-          command: check
-          arguments: --all-features
-          manifest-path: fuzz/Cargo.toml
+        run: cargo-deny --all-features --manifest-path fuzz/Cargo.toml check
 
   rust:
-    runs-on: docker
-    container:
-      image: rust:1.85-bookworm
+    name: rust (${{ matrix.gate }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gate:
+          - static
+          - test-core
+          - test-service
+          - test-independent
+          - test-relay-process
+          - test-websocket
+          - test-targets
+          - recognition
+          - mutations
     steps:
       - uses: actions/checkout@v4
-      - name: Format
-        run: cargo fmt --check
-      - name: Lint
-        run: cargo clippy --all-targets --all-features -- -D warnings
-      - name: Test
-        run: cargo test --all-targets --all-features
-      - name: Required security mutations
-        run: tools/run-mutations.sh
+      - name: Install Rust 1.85 toolchain
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain 1.85.0 --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install 1.85.0 --profile minimal \
+            --component clippy,rustfmt
+          rustup default 1.85.0
+          rustc --version
+          cargo --version
+      - name: Run ${{ matrix.gate }} gate
+        run: |
+          case "${{ matrix.gate }}" in
+            static)
+              cargo fmt --check
+              cargo clippy --all-targets --all-features -- -D warnings
+              ;;
+            test-core)
+              cargo test --lib --all-features
+              for target in assurance_properties cbcl_protocol channel context \
+                cpace dialects endpoint profiles recognition; do
+                cargo test --all-features --test "$target"
+              done
+              ;;
+            test-service)
+              for target in limiter_observability mailbox relay_service \
+                relay_work_bounds storage; do
+                cargo test --all-features --test "$target"
+              done
+              ;;
+            test-independent)
+              if ! command -v python3 >/dev/null 2>&1 || \
+                ! python3 -c 'import cryptography' >/dev/null 2>&1; then
+                SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+                $SUDO apt-get update
+                $SUDO apt-get install -y python3 python3-cryptography
+              fi
+              python3 --version
+              python3 -c 'import cryptography; print(cryptography.__version__)'
+              cargo test --all-features --test independent_endpoint
+              ;;
+            test-relay-process)
+              cargo test --all-features --test relay_process
+              ;;
+            test-websocket)
+              cargo test --all-features --test websocket_process
+              ;;
+            test-targets)
+              cargo test --bins --examples --all-features
+              ;;
+            recognition)
+              cargo test --release --test recognition \
+                test_023_maximum_adversarial_wire_message_has_bounded_recognition_work \
+                -- --exact
+              ;;
+            mutations)
+              tools/run-mutations.sh
+              ;;
+          esac

@@ -184,7 +184,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/src/bin/cbcl-pairing-relay.rs"
             ))
             .as_slice(),
-            "19daf1d84007e02606070539494e9a75984baaacfe598646906b5468d68b2e1d",
+            "c711f24f19f2e76da03493e478274cfdc50a9431c53520056e0fb42ff8951562",
         ),
         (
             include_bytes!(concat!(
@@ -192,7 +192,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/src/bin/cbcl-pairing-relay-ws.rs"
             ))
             .as_slice(),
-            "58d113d4811c710c219d939e8f6cdcb1ab9ef72d98f2ee4fb0e80213182736bf",
+            "9fbcf0fe4d2281f4a7c147080996045033204a74fe5b5e79bc9a6f7e69416ed0",
         ),
         (
             include_bytes!(concat!(
@@ -204,7 +204,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/mailbox.rs")).as_slice(),
-            "b385a9edb0ec1a34f1930daf94ffec977be78feb61887c31856e22d18c05da07",
+            "5df5fdca0c9105140e5ab20a7155b3db56030738b1b0a3d60a5ba77d8ee969f6",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/storage.rs")).as_slice(),
@@ -212,19 +212,19 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/relay.rs")).as_slice(),
-            "2acefa153b79a983bcacbdc6992fa854d162833e14e7809606d0aeba68d0d972",
+            "fd2956de38791f96660615feccba0d0287da1eebf3bbda1a8c74a4600d3af834",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/limiter.rs")).as_slice(),
-            "ace64e6c89d745b305af0c5dca42c5e90ab2643ce0ae0f009d66c41ce68e59ca",
+            "0ababe90ba3040f6fd66dbefc9041d23e040e872b1f007e60d4aa3ba596b3d47",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/observability.rs")).as_slice(),
-            "5c357c35c3a781b39ed1848fa9c6ab34dd3eb2c282a3114be9d9e7825e4b0ed8",
+            "892fd61c0a8d1cc3cbf24f0633f5a8dcbb32ea7f82a5363cd8daf1fb9b8bd177",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).as_slice(),
-            "d33713feb62e4edd5359b1ff4a1a9696c6a5bd1407fea8b64d1a013b8f5331f3",
+            "b71ff778cb624ba855c8125d38939283fb55b55e1af50375f02ef582d729d84a",
         ),
         (
             include_bytes!(concat!(
@@ -232,7 +232,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/.forgejo/workflows/ci.yml"
             ))
             .as_slice(),
-            "ff2e799e83cf488a1dd5f355713638c195fa79790883b74c5a679e4666b1b6ac",
+            "636c7c77c049280338c61f2a13a1fd05b610cad773c2d9ef849ef70a46e4832a",
         ),
     ] {
         assert_eq!(hex::encode(Sha256::digest(bytes)), expected);
@@ -351,4 +351,163 @@ fn credential_and_synthetic_payloads_bind_every_profile_field() {
         synthetic.recognise_payload(&synthetic_binding, &payload),
         Err(ProfileError::InvalidPayload)
     );
+}
+
+fn agent_claims(channel: &str) -> AgentIntentClaims {
+    AgentIntentClaims {
+        channel: channel.to_owned(),
+        claimed_principal: "principal".to_owned(),
+        agent_handle: "handle".to_owned(),
+        requested_grant: "grant".to_owned(),
+    }
+}
+
+fn credential_claims(origin: &str) -> CredentialIntentClaims {
+    CredentialIntentClaims {
+        application_id: "application".to_owned(),
+        origin: origin.to_owned(),
+        scope: "scope".to_owned(),
+        recipient: "recipient".to_owned(),
+    }
+}
+
+#[test]
+fn bounded_claim_text_holds_at_its_exact_limit_and_refuses_the_edges() {
+    // The channel field is bounded at 64 characters. Sitting exactly on the
+    // limit is what distinguishes `>` from `>=`; only testing well inside and
+    // well outside leaves the boundary itself unproven.
+    agent_claims(&"c".repeat(64))
+        .encode()
+        .expect("a channel of exactly the maximum length is accepted");
+
+    for (why, channel) in [
+        ("one character past the maximum", "c".repeat(65)),
+        ("an empty value", String::new()),
+        ("an embedded control character", "chan\u{7}nel".to_owned()),
+        ("an embedded newline", "chan\nnel".to_owned()),
+    ] {
+        assert_eq!(
+            agent_claims(&channel).encode().unwrap_err(),
+            ProfileError::InvalidClaim,
+            "a channel with {why} must be refused"
+        );
+    }
+
+    // The same bound applies to the fields validated together with it.
+    for (why, claims) in [
+        (
+            "an over-long principal",
+            AgentIntentClaims {
+                claimed_principal: "p".repeat(256),
+                ..agent_claims("channel")
+            },
+        ),
+        (
+            "an over-long handle",
+            AgentIntentClaims {
+                agent_handle: "h".repeat(129),
+                ..agent_claims("channel")
+            },
+        ),
+        (
+            "an over-long requested grant",
+            AgentIntentClaims {
+                requested_grant: "g".repeat(129),
+                ..agent_claims("channel")
+            },
+        ),
+    ] {
+        assert_eq!(
+            claims.encode().unwrap_err(),
+            ProfileError::InvalidClaim,
+            "claims with {why} must be refused"
+        );
+    }
+}
+
+#[test]
+fn credential_origins_must_be_canonical_https_authorities() {
+    credential_claims("https://example.com")
+        .encode()
+        .expect("a canonical https origin is accepted");
+    credential_claims("https://example.com:8443")
+        .encode()
+        .expect("an explicit port stays canonical");
+
+    for (why, origin) in [
+        ("a plaintext scheme", "http://example.com"),
+        ("a non-web scheme", "ftp://example.com"),
+        ("embedded credentials", "https://user@example.com"),
+        ("an embedded password", "https://user:secret@example.com"),
+        ("a query string", "https://example.com/?scope=all"),
+        ("a fragment", "https://example.com/#section"),
+        ("a path segment", "https://example.com/callback"),
+        ("a trailing slash", "https://example.com/"),
+        ("no host at all", "https://"),
+        ("an unparseable value", "not a url"),
+    ] {
+        assert_eq!(
+            credential_claims(origin).encode().unwrap_err(),
+            ProfileError::InvalidClaim,
+            "an origin with {why} must be refused"
+        );
+    }
+}
+
+#[test]
+fn grant_payloads_hold_at_both_ends_of_their_size_bound() {
+    let grant = |bytes: Vec<u8>| AgentGrant {
+        claimed_principal: "principal".to_owned(),
+        agent_handle: "handle".to_owned(),
+        requested_grant: "grant".to_owned(),
+        grant: bytes,
+    };
+
+    grant(vec![0x5a])
+        .encode()
+        .expect("a single grant octet meets the minimum");
+    grant(vec![0x5a; 63_000])
+        .encode()
+        .expect("a grant of exactly the maximum size is accepted");
+
+    assert_eq!(
+        grant(Vec::new()).encode().unwrap_err(),
+        ProfileError::InvalidPayload,
+        "an empty grant is below the minimum"
+    );
+    assert_eq!(
+        grant(vec![0x5a; 63_001]).encode().unwrap_err(),
+        ProfileError::InvalidPayload,
+        "one octet past the maximum must be refused"
+    );
+}
+
+#[test]
+fn synthetic_claims_are_bounded_on_both_fields() {
+    let claims = |subject: String, audience: String| SyntheticIntentClaims { subject, audience };
+
+    claims("s".repeat(128), "a".repeat(128))
+        .encode()
+        .expect("fields of exactly the maximum length are accepted");
+
+    for (why, subject, audience) in [
+        (
+            "an over-long subject",
+            "s".repeat(129),
+            "audience".to_owned(),
+        ),
+        (
+            "an over-long audience",
+            "subject".to_owned(),
+            "a".repeat(129),
+        ),
+        ("an empty subject", String::new(), "audience".to_owned()),
+        ("an empty audience", "subject".to_owned(), String::new()),
+    ] {
+        assert_eq!(
+            claims(subject, audience).encode().unwrap_err(),
+            ProfileError::InvalidClaim,
+            "synthetic claims with {why} must be refused"
+        );
+    }
 }

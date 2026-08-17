@@ -10,8 +10,11 @@ use std::{
     io::{BufRead, BufReader, Read},
     path::PathBuf,
     process::{Child, Command, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
 };
 use tungstenite::{connect, Message, WebSocket};
+
+static NEXT_KEY_FILE: AtomicU64 = AtomicU64::new(0);
 
 struct RelayProcess {
     child: Child,
@@ -21,8 +24,11 @@ struct RelayProcess {
 
 impl RelayProcess {
     fn start() -> Self {
-        let key_file =
-            std::env::temp_dir().join(format!("cbcl-pairing-ws-test-{}.key", std::process::id()));
+        let key_file = std::env::temp_dir().join(format!(
+            "cbcl-pairing-ws-test-{}-{}.key",
+            std::process::id(),
+            NEXT_KEY_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
         fs::write(&key_file, [0x91; 32]).expect("operator key");
         #[cfg(unix)]
         {
@@ -44,7 +50,15 @@ impl RelayProcess {
         let mut stdout = BufReader::new(child.stdout.take().unwrap());
         let mut line = String::new();
         stdout.read_line(&mut line).unwrap();
-        let address = line.strip_prefix("LISTEN ").unwrap().trim().to_owned();
+        let address = line.strip_prefix("LISTEN ").unwrap_or_else(|| {
+            let _ = child.wait();
+            let mut stderr = String::new();
+            if let Some(mut stream) = child.stderr.take() {
+                stream.read_to_string(&mut stderr).unwrap();
+            }
+            panic!("WebSocket relay did not announce a listener: stdout={line:?} stderr={stderr:?}")
+        });
+        let address = address.trim().to_owned();
         Self {
             child,
             address,
@@ -152,4 +166,15 @@ fn websocket_shell_carries_exact_cbor_and_routes_asynchronously() {
     let logs = process.stop();
     assert!(!logs.contains(&hex::encode(mailbox_id)));
     assert!(!logs.contains("opaque websocket frame"));
+}
+
+#[test]
+fn test_027_oversize_websocket_message_returns_413_before_close() {
+    let process = RelayProcess::start();
+    let (mut websocket, _) = connect(&process.address).expect("WebSocket");
+    websocket
+        .send(Message::Binary(vec![0_u8; 70_001].into()))
+        .expect("send oversize message");
+    assert_eq!(receive(&mut websocket), ServerMessage::Error(413));
+    let _ = process.stop();
 }
