@@ -1,14 +1,16 @@
 //! SPEC-001 TEST-061 and TEST-064 Red Gate: credential/v2 choreography.
 
 use cbcl_pairing::{
+    cpace,
     credential_v2::{
-        credential_v2_intent_digest, CredentialV2AccountProvenance, CredentialV2Advance,
-        CredentialV2BodyVerifier, CredentialV2Carrier, CredentialV2CarrierInput,
-        CredentialV2CheckpointNonce, CredentialV2DeviceBinding, CredentialV2Endpoint,
-        CredentialV2Error, CredentialV2IntentAuthority, CredentialV2IntentClaims,
-        CredentialV2IntentInput, CredentialV2IntentVerifier, CredentialV2Kind,
-        CredentialV2LogicalBody, CredentialV2Object, CredentialV2OfferParser, CredentialV2Phase,
-        CredentialV2TofuState, CredentialV2Transition,
+        credential_v2_intent_digest, encode_frame, CredentialV2AccountProvenance,
+        CredentialV2Advance, CredentialV2BodyVerifier, CredentialV2Carrier,
+        CredentialV2CarrierInput, CredentialV2CheckpointNonce, CredentialV2Context,
+        CredentialV2DeviceBinding, CredentialV2Endpoint, CredentialV2Error, CredentialV2Frame,
+        CredentialV2IntentAuthority, CredentialV2IntentClaims, CredentialV2IntentInput,
+        CredentialV2IntentVerifier, CredentialV2Kind, CredentialV2LogicalBody, CredentialV2Object,
+        CredentialV2OfferParser, CredentialV2Phase, CredentialV2Presence, CredentialV2TofuState,
+        CredentialV2Transition, PendingCredentialV2Channel, SecureCredentialV2Channel,
     },
     wire::Side,
 };
@@ -102,6 +104,46 @@ fn carrier() -> CredentialV2Carrier {
         expected_allocator_key: Some([0x44; 32]),
     })
     .unwrap()
+}
+
+fn secure_channels() -> (SecureCredentialV2Channel, SecureCredentialV2Channel) {
+    let context = CredentialV2Context::derive(&carrier(), [0x51; 32]).unwrap();
+    let allocator_presence = CredentialV2Presence::new([0x52; 16], [0x53; 16]);
+    let claimant_presence = CredentialV2Presence::new([0x52; 16], [0x53; 16]);
+    let (allocator_state, allocator_message) = context
+        .start_cpace(Side::Allocator, &allocator_presence, [0x54; 32])
+        .unwrap();
+    let (claimant_state, claimant_message) = context
+        .start_cpace(Side::Claimant, &claimant_presence, [0x55; 32])
+        .unwrap();
+    let isk_a = cpace::finish(allocator_state, &claimant_message).unwrap();
+    let isk_b = cpace::finish(claimant_state, &allocator_message).unwrap();
+    let allocator_frame =
+        encode_frame(&CredentialV2Frame::cpace(&allocator_message).unwrap()).unwrap();
+    let claimant_frame =
+        encode_frame(&CredentialV2Frame::cpace(&claimant_message).unwrap()).unwrap();
+    let pending_a = PendingCredentialV2Channel::new(
+        Side::Allocator,
+        isk_a,
+        context.public_context(),
+        &allocator_frame,
+        &claimant_frame,
+    )
+    .unwrap();
+    let pending_b = PendingCredentialV2Channel::new(
+        Side::Claimant,
+        isk_b,
+        context.public_context(),
+        &allocator_frame,
+        &claimant_frame,
+    )
+    .unwrap();
+    let finished_a = pending_a.local_finished_frame();
+    let finished_b = pending_b.local_finished_frame();
+    (
+        pending_a.confirm(&finished_b).unwrap(),
+        pending_b.confirm(&finished_a).unwrap(),
+    )
 }
 
 fn offer() -> CredentialV2Object {
@@ -361,9 +403,11 @@ fn test_067_recovery_mismatch_and_post_payload_refusal_leave_receipt_pending() {
 #[test]
 fn test_065_sealed_checkpoint_restores_exact_payload_receipt_wait() {
     let (_, mut claimant, payload) = endpoints_at_payload();
+    let (mut allocator_channel, claimant_channel) = secure_channels();
     let wrapping_key = [0xa1; 32];
     let checkpoint = claimant
         .seal_checkpoint(
+            &claimant_channel,
             &wrapping_key,
             1,
             None,
@@ -372,7 +416,7 @@ fn test_065_sealed_checkpoint_restores_exact_payload_receipt_wait() {
         )
         .expect("claimant retained checkpoint");
 
-    let mut restored = CredentialV2Endpoint::restore_checkpoint(
+    let restored = CredentialV2Endpoint::restore_checkpoint(
         checkpoint.as_bytes(),
         &wrapping_key,
         Side::Claimant,
@@ -382,19 +426,27 @@ fn test_065_sealed_checkpoint_restores_exact_payload_receipt_wait() {
         Box::new(BodyVerifier::default()),
     )
     .expect("null-expiry payload checkpoint outlives relay");
+    let (mut restored, mut restored_channel) = restored.into_parts();
     assert_eq!(restored.phase(), CredentialV2Phase::PayloadSent);
     assert_eq!(
         restored.send(&payload),
         Ok(CredentialV2Advance::ExactRetransmission)
+    );
+    let frame = restored_channel.seal(b"restored counter and keys").unwrap();
+    assert_eq!(
+        allocator_channel.open(&frame).unwrap(),
+        b"restored counter and keys"
     );
 }
 
 #[test]
 fn test_065_checkpoint_bindings_expiry_generation_and_nonce_are_closed() {
     let (mut allocator, mut claimant, _) = endpoints_at_payload();
+    let (allocator_channel, claimant_channel) = secure_channels();
     let wrapping_key = [0xb1; 32];
     assert!(matches!(
         allocator.seal_checkpoint(
+            &allocator_channel,
             &wrapping_key,
             1,
             None,
@@ -405,6 +457,7 @@ fn test_065_checkpoint_bindings_expiry_generation_and_nonce_are_closed() {
     ));
     assert!(matches!(
         claimant.seal_checkpoint(
+            &claimant_channel,
             &wrapping_key,
             1,
             Some(1_800_000_900),
@@ -416,6 +469,7 @@ fn test_065_checkpoint_bindings_expiry_generation_and_nonce_are_closed() {
 
     let checkpoint = allocator
         .seal_checkpoint(
+            &allocator_channel,
             &wrapping_key,
             1,
             Some(1_800_000_900),
@@ -431,6 +485,7 @@ fn test_065_checkpoint_bindings_expiry_generation_and_nonce_are_closed() {
     assert!(outer[8].as_bytes().unwrap().len() <= 69_632);
     assert!(matches!(
         allocator.seal_checkpoint(
+            &allocator_channel,
             &wrapping_key,
             2,
             Some(1_800_000_900),

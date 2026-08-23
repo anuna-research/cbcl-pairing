@@ -17,7 +17,9 @@ pub use carrier::{
     CredentialV2Presence,
 };
 pub use channel::{PendingCredentialV2Channel, SecureCredentialV2Channel};
-pub use checkpoint::{CredentialV2CheckpointNonce, EndpointCheckpointV2};
+pub use checkpoint::{
+    CredentialV2CheckpointNonce, EndpointCheckpointV2, RestoredCredentialV2Endpoint,
+};
 pub use context::CredentialV2Context;
 pub use display::{
     credential_v2_intent_digest, recognise_credential_v2_intent, CredentialV2AccountProvenance,

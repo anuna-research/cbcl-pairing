@@ -20,15 +20,17 @@ compile-fail doctests, and strict clippy passed.
 The sealed reducer checkpoint uses the exact role-specific deterministic-CBOR
 HKDF info, ceremony salt, AES-256-GCM outer shape and seven-member AAD. It binds
 role, profile, raw carrier ceremony, positive generation, expiry, nonce,
-carrier, phase, intent, predecessor object, and cached retransmission. It
-refuses wrong keys, tampering, changed generation, expiry-shape violations, and
-nonce reuse. A claimant payload checkpoint uses null expiry and restores after
-relay expiry.
+carrier, phase, intent, predecessor object, cached retransmission, transcript,
+traffic keys, IVs, exporter, and both exact next counters. It refuses wrong
+keys, tampering, changed generation, expiry-shape violations, channel-role
+substitution, terminal channel state, and nonce reuse. A claimant payload
+checkpoint uses null expiry, restores after relay expiry, and resumes an
+interoperable next encrypted frame at the retained counter.
 
 This is deliberately not the final CON-030 evidence. The current reducer type
-does not own pre-Finished admission secrets, relay membership, or live traffic
-keys/counters, so those values are not yet inside this checkpoint. The complete
-session composition and crash matrix remain open before the
+does not own pre-Finished admission secrets or relay membership, so those
+values are not yet inside this checkpoint. The complete pre-Finished session
+composition and crash matrix remain open before the
 `pairing-v2-channel` task can be completed.
 
 The hard-coded allocator vector was independently calculated with Python's

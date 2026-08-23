@@ -176,6 +176,19 @@ pub struct SecureCredentialV2Channel {
     terminal: bool,
 }
 
+pub(super) struct SecureCredentialV2ChannelSnapshot {
+    pub(super) local_side: Side,
+    pub(super) transcript_hash: [u8; 64],
+    pub(super) send_key: Zeroizing<[u8; 32]>,
+    pub(super) receive_key: Zeroizing<[u8; 32]>,
+    pub(super) send_iv: Zeroizing<[u8; 12]>,
+    pub(super) receive_iv: Zeroizing<[u8; 12]>,
+    pub(super) exporter: Zeroizing<[u8; 32]>,
+    pub(super) next_send_counter: Option<u64>,
+    pub(super) next_receive_counter: Option<u64>,
+    pub(super) terminal: bool,
+}
+
 impl fmt::Debug for SecureCredentialV2Channel {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("SecureCredentialV2Channel([REDACTED])")
@@ -183,6 +196,40 @@ impl fmt::Debug for SecureCredentialV2Channel {
 }
 
 impl SecureCredentialV2Channel {
+    pub(super) fn checkpoint_snapshot(&self) -> SecureCredentialV2ChannelSnapshot {
+        SecureCredentialV2ChannelSnapshot {
+            local_side: self.local_side,
+            transcript_hash: self.transcript_hash,
+            send_key: Zeroizing::new(*self.send_key),
+            receive_key: Zeroizing::new(*self.receive_key),
+            send_iv: Zeroizing::new(*self.send_iv),
+            receive_iv: Zeroizing::new(*self.receive_iv),
+            exporter: Zeroizing::new(*self.exporter),
+            next_send_counter: self.next_send_counter,
+            next_receive_counter: self.next_receive_counter,
+            terminal: self.terminal,
+        }
+    }
+
+    pub(super) fn restore_snapshot(snapshot: SecureCredentialV2ChannelSnapshot) -> Self {
+        Self {
+            local_side: snapshot.local_side,
+            transcript_hash: snapshot.transcript_hash,
+            send_key: snapshot.send_key,
+            receive_key: snapshot.receive_key,
+            send_iv: snapshot.send_iv,
+            receive_iv: snapshot.receive_iv,
+            exporter: snapshot.exporter,
+            next_send_counter: snapshot.next_send_counter,
+            next_receive_counter: snapshot.next_receive_counter,
+            terminal: snapshot.terminal,
+        }
+    }
+
+    pub(super) const fn local_side(&self) -> Side {
+        self.local_side
+    }
+
     /// Seal one plaintext with the exact next local-direction counter.
     pub fn seal(&mut self, plaintext: &[u8]) -> Result<CredentialV2Frame, CredentialV2Error> {
         if self.terminal {

@@ -1,7 +1,8 @@
+use super::channel::SecureCredentialV2ChannelSnapshot;
 use super::{
     decode_canonical, decode_object, encode_carrier, fixed_bytes, CredentialV2BodyVerifier,
     CredentialV2Carrier, CredentialV2Endpoint, CredentialV2Error, CredentialV2Kind,
-    CredentialV2Phase,
+    CredentialV2Phase, SecureCredentialV2Channel,
 };
 use crate::wire::Side;
 use aes_gcm::{
@@ -43,6 +44,26 @@ pub struct EndpointCheckpointV2 {
     bytes: Vec<u8>,
 }
 
+/// Restored application reducer and its inseparable live traffic-key state.
+pub struct RestoredCredentialV2Endpoint {
+    endpoint: CredentialV2Endpoint,
+    channel: SecureCredentialV2Channel,
+}
+
+impl RestoredCredentialV2Endpoint {
+    /// Consume the restored aggregate into the two live protocol components.
+    #[must_use]
+    pub fn into_parts(self) -> (CredentialV2Endpoint, SecureCredentialV2Channel) {
+        (self.endpoint, self.channel)
+    }
+}
+
+impl std::fmt::Debug for RestoredCredentialV2Endpoint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RestoredCredentialV2Endpoint([REDACTED])")
+    }
+}
+
 impl EndpointCheckpointV2 {
     /// Borrow the exact sealed deterministic-CBOR checkpoint bytes.
     #[must_use]
@@ -55,12 +76,16 @@ impl CredentialV2Endpoint {
     /// Seal the reducer's current authority before an outbound effect.
     pub fn seal_checkpoint(
         &mut self,
+        channel: &SecureCredentialV2Channel,
         wrapping_key: &[u8; 32],
         generation: u64,
         expiry: Option<u64>,
         nonce: CredentialV2CheckpointNonce,
         now: u64,
     ) -> Result<EndpointCheckpointV2, CredentialV2Error> {
+        if channel.local_side() != self.side {
+            return Err(CredentialV2Error::Direction);
+        }
         validate_checkpoint_phase(
             self.side,
             self.phase,
@@ -75,7 +100,7 @@ impl CredentialV2Endpoint {
             return Err(CredentialV2Error::Counter);
         }
 
-        let plaintext = encode_inner(self, generation, nonce.0)?;
+        let plaintext = encode_inner(self, channel, generation, nonce.0)?;
         if plaintext.is_empty() || plaintext.len() > MAX_PLAINTEXT {
             return Err(CredentialV2Error::Size);
         }
@@ -124,7 +149,7 @@ impl CredentialV2Endpoint {
         expected_generation: u64,
         now: u64,
         body_verifier: Box<dyn CredentialV2BodyVerifier>,
-    ) -> Result<Self, CredentialV2Error> {
+    ) -> Result<RestoredCredentialV2Endpoint, CredentialV2Error> {
         let outer = decode_outer(input)?;
         if outer.side != expected_side
             || outer.ceremony != *expected_carrier.carrier_ceremony_id()
@@ -152,7 +177,7 @@ impl CredentialV2Endpoint {
                 )
                 .map_err(|_| CredentialV2Error::Authentication)?,
         );
-        let endpoint = decode_inner(
+        let (endpoint, channel) = decode_inner(
             plaintext.as_slice(),
             expected_side,
             expected_carrier,
@@ -167,7 +192,7 @@ impl CredentialV2Endpoint {
             endpoint.carrier.relay_expires_at(),
             now,
         )?;
-        Ok(endpoint)
+        Ok(RestoredCredentialV2Endpoint { endpoint, channel })
     }
 }
 
@@ -284,6 +309,7 @@ fn checkpoint_key_info(side: Side) -> Result<Vec<u8>, CredentialV2Error> {
 
 fn encode_inner(
     endpoint: &CredentialV2Endpoint,
+    channel: &SecureCredentialV2Channel,
     generation: u64,
     nonce: [u8; 12],
 ) -> Result<Zeroizing<Vec<u8>>, CredentialV2Error> {
@@ -315,6 +341,7 @@ fn encode_inner(
     }
     output.extend_from_slice(&generation.to_be_bytes());
     output.extend_from_slice(&nonce);
+    append_channel(&mut output, &channel.checkpoint_snapshot());
     Ok(output)
 }
 
@@ -325,7 +352,7 @@ fn decode_inner(
     expected_generation: u64,
     expected_nonce: [u8; 12],
     body_verifier: Box<dyn CredentialV2BodyVerifier>,
-) -> Result<CredentialV2Endpoint, CredentialV2Error> {
+) -> Result<(CredentialV2Endpoint, SecureCredentialV2Channel), CredentialV2Error> {
     let mut cursor = ByteCursor::new(input);
     if cursor.take(INNER_DOMAIN.len())? != INNER_DOMAIN {
         return Err(CredentialV2Error::Schema);
@@ -358,14 +385,17 @@ fn decode_inner(
     };
     let generation = cursor.u64()?;
     let nonce = cursor.array()?;
+    let channel = decode_channel(&mut cursor)?;
     if !cursor.finished()
         || generation != expected_generation
         || nonce != expected_nonce
+        || channel.local_side != side
+        || channel.terminal
         || !consistent_projection(phase, intent_digest, last.as_ref())
     {
         return Err(CredentialV2Error::Schema);
     }
-    Ok(CredentialV2Endpoint {
+    let endpoint = CredentialV2Endpoint {
         side,
         carrier,
         phase,
@@ -374,7 +404,65 @@ fn decode_inner(
         body_verifier,
         checkpoint_generation: generation,
         checkpoint_nonce: Some(nonce),
+    };
+    Ok((
+        endpoint,
+        SecureCredentialV2Channel::restore_snapshot(channel),
+    ))
+}
+
+fn append_channel(output: &mut Vec<u8>, channel: &SecureCredentialV2ChannelSnapshot) {
+    output.push(side_number(channel.local_side));
+    output.extend_from_slice(&channel.transcript_hash);
+    output.extend_from_slice(channel.send_key.as_slice());
+    output.extend_from_slice(channel.receive_key.as_slice());
+    output.extend_from_slice(channel.send_iv.as_slice());
+    output.extend_from_slice(channel.receive_iv.as_slice());
+    output.extend_from_slice(channel.exporter.as_slice());
+    append_counter(output, channel.next_send_counter);
+    append_counter(output, channel.next_receive_counter);
+    output.push(u8::from(channel.terminal));
+}
+
+fn decode_channel(
+    cursor: &mut ByteCursor<'_>,
+) -> Result<SecureCredentialV2ChannelSnapshot, CredentialV2Error> {
+    let local_side = number_side(cursor.byte()?)?;
+    let transcript_hash = cursor.array()?;
+    let send_key = Zeroizing::new(cursor.array()?);
+    let receive_key = Zeroizing::new(cursor.array()?);
+    let send_iv = Zeroizing::new(cursor.array()?);
+    let receive_iv = Zeroizing::new(cursor.array()?);
+    let exporter = Zeroizing::new(cursor.array()?);
+    let next_send_counter = cursor.counter()?;
+    let next_receive_counter = cursor.counter()?;
+    let terminal = match cursor.byte()? {
+        0 => false,
+        1 => true,
+        _ => return Err(CredentialV2Error::Schema),
+    };
+    Ok(SecureCredentialV2ChannelSnapshot {
+        local_side,
+        transcript_hash,
+        send_key,
+        receive_key,
+        send_iv,
+        receive_iv,
+        exporter,
+        next_send_counter,
+        next_receive_counter,
+        terminal,
     })
+}
+
+fn append_counter(output: &mut Vec<u8>, counter: Option<u64>) {
+    match counter {
+        Some(value) => {
+            output.push(1);
+            output.extend_from_slice(&value.to_be_bytes());
+        }
+        None => output.push(0),
+    }
 }
 
 fn consistent_projection(
@@ -493,6 +581,14 @@ impl<'a> ByteCursor<'a> {
             return Err(CredentialV2Error::Size);
         }
         self.take(length)
+    }
+
+    fn counter(&mut self) -> Result<Option<u64>, CredentialV2Error> {
+        match self.byte()? {
+            0 => Ok(None),
+            1 => Ok(Some(self.u64()?)),
+            _ => Err(CredentialV2Error::Schema),
+        }
     }
 
     fn finished(&self) -> bool {
