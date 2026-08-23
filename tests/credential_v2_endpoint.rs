@@ -294,6 +294,93 @@ fn test_064_post_payload_refusal_neither_advances_nor_erases_receipt_wait() {
     assert_eq!(claimant.phase(), CredentialV2Phase::Terminal);
 }
 
+#[test]
+fn test_067_recovered_receipt_uses_registered_verifier_and_same_terminal_reducer() {
+    let (mut allocator, mut claimant, payload) = endpoints_at_payload();
+    let receipt = successor(CredentialV2Kind::Receipt, &payload);
+
+    let authority = claimant
+        .authenticate_recovered_receipt(&receipt)
+        .expect("registered verifier authenticates recovery");
+    assert_eq!(claimant.phase(), CredentialV2Phase::PayloadSent);
+    assert_eq!(
+        claimant.recover_receipt(&receipt, authority),
+        Ok(CredentialV2Advance::Advanced)
+    );
+    assert_eq!(claimant.phase(), CredentialV2Phase::Terminal);
+
+    assert_eq!(
+        allocator.receive(&receipt),
+        Err(CredentialV2Error::Direction)
+    );
+}
+
+#[test]
+fn test_067_recovery_mismatch_and_post_payload_refusal_leave_receipt_pending() {
+    let (_, mut claimant, payload) = endpoints_at_payload();
+    let receipt = successor(CredentialV2Kind::Receipt, &payload);
+    let authority = claimant
+        .authenticate_recovered_receipt(&receipt)
+        .expect("authority");
+    let mut other = successor(CredentialV2Kind::Receipt, &payload);
+    let mut body: Value = ciborium::de::from_reader(other.body()).unwrap();
+    let Value::Map(entries) = &mut body else {
+        panic!("receipt map")
+    };
+    let digest = entries
+        .iter_mut()
+        .find(|(key, _)| key.as_text() == Some("finalStatusDigest"))
+        .map(|(_, value)| value)
+        .unwrap();
+    *digest = Value::Bytes(vec![0x72; 32]);
+    other = CredentialV2Object::new(
+        CredentialV2Kind::Receipt,
+        intent(),
+        cbor2::to_canonical_vec(&body).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        claimant.recover_receipt(&other, authority),
+        Err(CredentialV2Error::Profile)
+    );
+    assert_eq!(claimant.phase(), CredentialV2Phase::PayloadSent);
+
+    let refusal = successor(CredentialV2Kind::Refusal, &payload);
+    assert_eq!(claimant.receive(&refusal), Err(CredentialV2Error::Phase));
+    let authority = claimant
+        .authenticate_recovered_receipt(&receipt)
+        .expect("recovery remains available");
+    claimant
+        .recover_receipt(&receipt, authority)
+        .expect("recovered receipt");
+    assert_eq!(claimant.phase(), CredentialV2Phase::Terminal);
+}
+
+fn endpoints_at_payload() -> (
+    CredentialV2Endpoint,
+    CredentialV2Endpoint,
+    CredentialV2Object,
+) {
+    let (mut allocator, mut claimant) = endpoints();
+    let offer = offer();
+    allocator.send(&offer).unwrap();
+    claimant
+        .receive_offer(&offer, &authority(), &mut Parser, &mut IntentVerifier)
+        .unwrap();
+    let approve = successor(CredentialV2Kind::IntentApprove, &offer);
+    exchange(&mut claimant, &mut allocator, &approve);
+    let preparation = successor(CredentialV2Kind::Preparation, &approve);
+    exchange(&mut claimant, &mut allocator, &preparation);
+    let comparison = successor(CredentialV2Kind::ComparisonConfirmed, &preparation);
+    exchange(&mut allocator, &mut claimant, &comparison);
+    let final_approve = successor(CredentialV2Kind::FinalApprove, &comparison);
+    exchange(&mut claimant, &mut allocator, &final_approve);
+    let payload = successor(CredentialV2Kind::Payload, &final_approve);
+    exchange(&mut claimant, &mut allocator, &payload);
+    (allocator, claimant, payload)
+}
+
 fn exchange(
     sender: &mut CredentialV2Endpoint,
     receiver: &mut CredentialV2Endpoint,

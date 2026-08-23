@@ -4,6 +4,7 @@ use super::{
     CredentialV2IntentVerifier, CredentialV2Kind, CredentialV2Object, CredentialV2OfferParser,
 };
 use crate::wire::Side;
+use sha2::{Digest, Sha256};
 use std::fmt;
 use subtle::ConstantTimeEq;
 
@@ -80,6 +81,25 @@ impl CredentialV2LogicalBody<'_> {
 pub trait CredentialV2BodyVerifier: fmt::Debug + Send {
     /// Recognise the complete body and return only a closed verdict.
     fn verify(&mut self, body: &CredentialV2LogicalBody<'_>) -> Result<(), CredentialV2Error>;
+}
+
+/// One-use authority minted only after the registered receipt verifier succeeds.
+///
+/// Its fields are private, and the value is not cloneable:
+///
+/// ```compile_fail
+/// use cbcl_pairing::credential_v2::CredentialV2RecoveredReceiptAuthority;
+/// fn duplicate(value: &CredentialV2RecoveredReceiptAuthority) {
+///     let _: CredentialV2RecoveredReceiptAuthority = value.clone();
+/// }
+/// ```
+pub struct CredentialV2RecoveredReceiptAuthority {
+    application_context: String,
+    carrier_ceremony_id: [u8; 32],
+    intent_digest: [u8; 32],
+    payload_content_hash: [u8; 32],
+    final_status_digest: [u8; 32],
+    receipt_body_digest: [u8; 32],
 }
 
 #[derive(Debug)]
@@ -169,6 +189,85 @@ impl CredentialV2Endpoint {
         };
         self.accept(object, sender, CredentialV2Phase::Offered);
         Ok(CredentialV2Advance::DisplayIntent(Box::new(display)))
+    }
+
+    /// Authenticate one recovery receipt with the registered body verifier.
+    ///
+    /// Failure leaves the retained `payload -> receipt` phase unchanged.
+    pub fn authenticate_recovered_receipt(
+        &mut self,
+        receipt: &CredentialV2Object,
+    ) -> Result<CredentialV2RecoveredReceiptAuthority, CredentialV2Error> {
+        if self.side != Side::Claimant
+            || self.phase != CredentialV2Phase::PayloadSent
+            || receipt.kind() != CredentialV2Kind::Receipt
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        let Some(intent_digest) = self.intent_digest else {
+            return Err(CredentialV2Error::Phase);
+        };
+        if receipt.intent_digest() != &intent_digest {
+            return Err(CredentialV2Error::Profile);
+        }
+        let logical = recognise_logical_body(receipt)?;
+        if &logical.carrier_ceremony_id != self.carrier.carrier_ceremony_id() {
+            return Err(CredentialV2Error::Profile);
+        }
+        let Some(payload) = &self.last else {
+            return Err(CredentialV2Error::Phase);
+        };
+        if !bool::from(logical.predecessor_digest.ct_eq(&payload.content_hash)) {
+            return Err(CredentialV2Error::Predecessor);
+        }
+        self.body_verifier.verify(&logical)?;
+        Ok(CredentialV2RecoveredReceiptAuthority {
+            application_context: self.carrier.application_context().into(),
+            carrier_ceremony_id: *self.carrier.carrier_ceremony_id(),
+            intent_digest,
+            payload_content_hash: payload.content_hash,
+            final_status_digest: receipt_final_status_digest(receipt.body())?,
+            receipt_body_digest: Sha256::digest(receipt.body()).into(),
+        })
+    }
+
+    /// Consume authenticated recovery authority through the ordinary terminal edge.
+    ///
+    /// Any mismatch leaves the claimant waiting for a valid receipt.
+    pub fn recover_receipt(
+        &mut self,
+        receipt: &CredentialV2Object,
+        authority: CredentialV2RecoveredReceiptAuthority,
+    ) -> Result<CredentialV2Advance, CredentialV2Error> {
+        if self.side != Side::Claimant
+            || self.phase != CredentialV2Phase::PayloadSent
+            || receipt.kind() != CredentialV2Kind::Receipt
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        let logical = recognise_logical_body(receipt)?;
+        let Some(payload) = &self.last else {
+            return Err(CredentialV2Error::Phase);
+        };
+        let Some(intent_digest) = self.intent_digest else {
+            return Err(CredentialV2Error::Phase);
+        };
+        let final_status_digest = receipt_final_status_digest(receipt.body())?;
+        let receipt_body_digest: [u8; 32] = Sha256::digest(receipt.body()).into();
+        let matches = authority.application_context == self.carrier.application_context()
+            && authority.carrier_ceremony_id == *self.carrier.carrier_ceremony_id()
+            && authority.intent_digest == intent_digest
+            && authority.payload_content_hash == payload.content_hash
+            && bool::from(authority.final_status_digest.ct_eq(&final_status_digest))
+            && bool::from(authority.receipt_body_digest.ct_eq(&receipt_body_digest))
+            && receipt.intent_digest() == &intent_digest
+            && &logical.carrier_ceremony_id == self.carrier.carrier_ceremony_id()
+            && bool::from(logical.predecessor_digest.ct_eq(&payload.content_hash));
+        if !matches {
+            return Err(CredentialV2Error::Profile);
+        }
+        self.accept(receipt, Side::Allocator, CredentialV2Phase::Terminal);
+        Ok(CredentialV2Advance::Advanced)
     }
 
     fn apply(
@@ -309,6 +408,16 @@ fn validate_receipt(
         return Err(CredentialV2Error::Schema);
     }
     Ok(())
+}
+
+fn receipt_final_status_digest(input: &[u8]) -> Result<[u8; 32], CredentialV2Error> {
+    let value = decode_canonical(input)?;
+    let entries = map_entries(&value)?;
+    validate_receipt(entries)?;
+    fixed_bytes(field(
+        entries,
+        &ciborium::Value::Text("finalStatusDigest".into()),
+    )?)
 }
 
 fn valid_compact_jws(value: &str) -> bool {

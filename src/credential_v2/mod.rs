@@ -25,7 +25,7 @@ pub use display::{
 };
 pub use endpoint::{
     CredentialV2Advance, CredentialV2BodyVerifier, CredentialV2Endpoint, CredentialV2LogicalBody,
-    CredentialV2Phase,
+    CredentialV2Phase, CredentialV2RecoveredReceiptAuthority,
 };
 pub use frame::{decode_frame, encode_frame, CredentialV2Frame};
 pub use object::{
