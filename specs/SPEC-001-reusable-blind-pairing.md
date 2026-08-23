@@ -4,7 +4,7 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.6-draft
+version: 0.5.7-draft
 last-updated: 2026-08-24
 owner-repo: cbcl-pairing
 implementation-status: credential-v1-local-complete; credential-v2-unimplemented
@@ -14,13 +14,13 @@ derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574ed
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
 authority-form: consolidated-current-protocol-and-consumer-pointer
-consumer-design: selfsame SPEC-008 0.5.7-draft
-coordinated-safety-design: selfsame SPEC-007 0.3.5-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.7-draft
+consumer-design: selfsame SPEC-008 0.5.8-draft
+coordinated-safety-design: selfsame SPEC-007 0.3.6-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.8-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> direct 0.5.0 reissue -> rejected coordinated reviews through 0.5.6 -> v2 lifetime and receipt-name closure"
+generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> rejected coordinated reviews through 0.5.7 -> exact checkpoint and mailbox closure"
 ---
 
 # SPEC-001 — reusable blind pairing
@@ -31,6 +31,10 @@ implementation and exact local protocol assets.
 
 This draft does not approve production deployment or production invitation
 allocation.
+
+The immediate correction input is Selfsame trajectory report
+`spec-008-0.5.7-claude-adversarial-review-2026-08-24`. This revision retains
+every closed mechanism finding and resolves its pairing-owned observations.
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL are interpreted as described in BCP 14. Their
@@ -1529,10 +1533,10 @@ scan unrelated mailboxes, bodies, expiries, memberships, or limiter entries.
 The relay retains at most one 32-octet commitment per waiting v2 mailbox. It
 never persists `T` and never exposes either secret through observability.
 
-The v2 mailbox lifetime SHALL be between 600 and 900 seconds. Its default is
-900 seconds. This range lets a consuming hub require 600 remaining seconds
-while permitting transport from relay allocation to hub allocation. The shared
-relay message ceiling remains 70,000 octets.
+The v2 mailbox lifetime SHALL be exactly 900 seconds. An omitted lifetime also
+selects 900 seconds. This value lets a consuming hub require 600 remaining
+seconds. It also permits 300 seconds for transport before hub allocation. The
+shared relay message ceiling remains 70,000 octets.
 
 Control logical bodies contain 1 through 2,048 octets. Large logical bodies
 contain 1 through 62,000 octets.
@@ -1566,7 +1570,7 @@ allocate-v2 = {
   "type": "allocate-v2",
   "mailbox-id": bstr .size 32,
   "claim-commitment": bstr .size 32,
-  ? "ttl-seconds": 600..900
+  ? "ttl-seconds": 900
 }
 
 claim-v2 = {
@@ -1590,8 +1594,9 @@ claimed-v2 = {
 }
 ```
 
-An omitted `ttl-seconds` in `allocate-v2` selects 900 seconds. Credential/v1
-keeps its 60-through-600 range and 600-second default unchanged.
+An omitted `ttl-seconds` in `allocate-v2` selects 900 seconds. Any other
+credential/v2 value refuses before mailbox allocation. Credential/v1 keeps its
+60-through-600 range and 600-second default unchanged.
 
 The committed schema contains one closed client union and one closed server
 union. Duplicate keys, extras, trailing bytes, and non-canonical encoding
@@ -1765,6 +1770,11 @@ The JWS text contains only compact-JWS ASCII. The digest is raw SHA-256 over
 the JWS payload's exact RFC-8785 octets. Unknown members, another ceremony,
 another predecessor, invalid ASCII, or a digest mismatch refuse installation.
 
+Relay carriers and HTTPS recovery objects retain their existing kebab-case
+member names. Credential/v2 endpoint logical bodies use the camel-case names
+declared by their own closed grammars. No recognizer translates names between
+those object families.
+
 Field 2 contains one `intentDigest`. Field 3 contains the logical body length.
 The remaining field-4 bytes are zero.
 
@@ -1824,10 +1834,10 @@ permissions, device binding, exact-pair TOFU state, transition, and signed
 offer-core digest.
 
 For the Selfsame profile, `CredentialV2IntentInput` is constructed only from
-the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.7-draft
+the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.8-draft
 CON-012's `signed-offer-v2` and its exact `OfferCoreV2`. The other ten body
 kinds cannot construct or amend an intent input. The consumer's nine successor
-body grammars are Selfsame SPEC-008 0.5.7-draft CON-987.
+body grammars are Selfsame SPEC-008 0.5.8-draft CON-987.
 
 The profile first parses one bounded peer `CredentialV2IntentInput`. Before any
 display allocation, it SHALL require byte equality between every overlapping
@@ -1888,9 +1898,20 @@ DID derivation, grant issuance, or browser persistence.
 generic serialization, or plaintext export. The protocol library SHALL seal
 and open it only with a consumer-supplied 32-octet wrapping key.
 
-The checkpoint key is HKDF-SHA512 over that wrapping key. Its salt is the raw
-carrier ceremony ID. Its info is deterministic CBOR containing the label
-`cbcl-pairing checkpoint key/v2`, endpoint role, and application context.
+The checkpoint-key info has this exact deterministic-CBOR shape:
+
+```cddl
+credential-v2-checkpoint-key-info = [
+  "cbcl-pairing checkpoint key/v2",
+  "allocator" / "claimant",
+  "anuna.io/credential/v2"
+]
+```
+
+The checkpoint key uses HKDF-SHA512. The extract salt is the raw 32-octet
+carrier ceremony ID. The input keying material is the consumer-supplied raw
+32-octet wrapping key. The expand info is the exact CBOR value above. The
+expand output is exactly 32 octets and becomes the AES-256-GCM key.
 
 The sealed checkpoint has this deterministic-CBOR outer shape:
 
@@ -2106,8 +2127,8 @@ Inspect snapshots, stores, heap retention, logs, metrics, traces, and errors.
 No claim bearer survives, and no commitment survives successful admission.
 
 For credential/v1, accept lifetimes 60 and 600 and refuse 59 and 601. Require
-the unchanged 600-second default. For credential/v2, accept 600 and 900 and
-refuse 599 and 901. Require the 900-second default and immutable returned
+the unchanged 600-second default. For credential/v2, accept only 900. Refuse
+599, 600, 899, and 901. Require the 900-second default and immutable returned
 expiry. Re-run version-1 wire vectors byte-identically.
 
 ### TEST-061: Credential/v2 cryptography and state are independently reproducible
@@ -2167,9 +2188,9 @@ pointer, one current hub pointer, and one current test set.
 The current test set contains TEST-001 through TEST-029 and TEST-060 through
 TEST-067. No trajectory test supplies current authority.
 
-The current consumer is Selfsame SPEC-008 0.5.7-draft. The current safety
-authority is Selfsame SPEC-007 0.3.5-draft. The current hub design is cbcl-bus
-SPEC-053 0.17.7-draft.
+The current consumer is Selfsame SPEC-008 0.5.8-draft. The current safety
+authority is Selfsame SPEC-007 0.3.6-draft. The current hub design is cbcl-bus
+SPEC-053 0.17.8-draft.
 
 All four coordinated parents record the same generation metadata and review
 set.
@@ -2177,8 +2198,9 @@ set.
 A qualifying reviewer uses another model family and a fresh session. The
 report records model, authentication path, session, and Circus attempt.
 
-A fresh Tier-1 PASS authorizes only the Elephant SPL and test-first plan. It
-authorizes no production allocation, release, or deployment.
+The repository owner's 2026-08-24 waiver authorizes the Elephant SPL and local
+test-first implementation before PASS. It authorizes no production allocation,
+release, or deployment. Those actions retain every production gate below.
 
 ### TEST-064: One carrier ceremony identifier governs every v2 binding
 
@@ -2200,6 +2222,8 @@ non-canonical member before a receipt effect.
 
 Require the exact member names `carrierCeremonyId`, `predecessorDigest`,
 `finalStatusJws`, and `finalStatusDigest`. Refuse every kebab-case substitute.
+Require relay-carrier and HTTPS-recovery recognizers to retain their declared
+kebab-case names. Require no cross-family name translation.
 
 Mutate each occurrence independently. Require refusal before display,
 decision, payload, status rebind, or identity effect.
@@ -2258,6 +2282,8 @@ reproduce the thirteen-member public context, `TH`, and `PRK`. They reproduce
 all seven HKDF outputs, both Finished values, and every directional nonce. They
 also reproduce exact AAD bytes, sealed frames, content hashes, and predecessors.
 They assign the eleven object kinds exactly to integers 0 through 10.
+They also reproduce the exact checkpoint-key info, extract, expand, and
+32-octet output for both endpoint roles.
 
 Exercise counters zero, one, 255, 256, the largest unsigned 64-bit value, and
 exhaustion. Mutate one public-context position, nullable key, role, label byte,
@@ -2366,7 +2392,13 @@ required Tier-1 review.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.5.6-draft</summary>
+<summary>Revision history — 0.1.0 → 0.5.7-draft</summary>
+
+- 0.5.7-draft — fixes the credential/v2 mailbox lifetime at 900 seconds. It
+  defines the checkpoint-key info, extract, expand, and output exactly. It
+  records the closed member-name partition. The owner authorizes local
+  test-first work. Production allocation, release, and deployment remain
+  prohibited.
 
 - 0.5.6-draft — gives credential/v2 a 900-second mailbox default and aligns
   receipt member names with the consumer bodies. Credential/v1 lifetime and
