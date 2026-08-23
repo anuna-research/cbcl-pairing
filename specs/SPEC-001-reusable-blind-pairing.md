@@ -4,7 +4,7 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.3-draft
+version: 0.5.4-draft
 last-updated: 2026-08-24
 owner-repo: cbcl-pairing
 implementation-status: credential-v1-local-complete; credential-v2-unimplemented
@@ -14,13 +14,13 @@ derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574ed
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
 authority-form: consolidated-current-protocol-and-consumer-pointer
-consumer-design: selfsame SPEC-008 0.5.4-draft
-coordinated-safety-design: selfsame SPEC-007 0.3.2-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.4-draft
+consumer-design: selfsame SPEC-008 0.5.5-draft
+coordinated-safety-design: selfsame SPEC-007 0.3.3-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.5-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> direct 0.5.0 reissue -> rejected coordinated reviews through 0.5.3 -> exact kind assignment and post-payload recovery closure"
+generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> direct 0.5.0 reissue -> rejected coordinated reviews through 0.5.4 -> explicit role-specific checkpoint expiry"
 ---
 
 # SPEC-001 — reusable blind pairing
@@ -1817,10 +1817,10 @@ permissions, device binding, exact-pair TOFU state, transition, and signed
 offer-core digest.
 
 For the Selfsame profile, `CredentialV2IntentInput` is constructed only from
-the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.4-draft
+the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.5-draft
 CON-012's `signed-offer-v2` and its exact `OfferCoreV2`. The other ten body
 kinds cannot construct or amend an intent input. The consumer's nine successor
-body grammars are Selfsame SPEC-008 0.5.4-draft CON-987.
+body grammars are Selfsame SPEC-008 0.5.5-draft CON-987.
 
 The profile first parses one bounded peer `CredentialV2IntentInput`. Before any
 display allocation, it SHALL require byte equality between every overlapping
@@ -1902,11 +1902,12 @@ credential-v2-checkpoint = [
 ```
 
 The fifth member is the raw carrier ceremony ID. The integer is checkpoint
-generation. The following member is an absolute
-expiry or `null`. `null` applies only after a claimant durably sends its
-payload and before receipt. The authenticated application status can outlive
-the relay mailbox. The nonce is fresh CSPRNG
-output for AES-256-GCM. The preceding seven members form its exact AAD.
+generation. The following member is an absolute expiry or `null`. Only a
+claimant checkpoint can use `null`. It does so only after durable payload send
+and before verified receipt. The authenticated application status can outlive
+the relay mailbox. An allocator checkpoint always carries the original numeric
+expiry. The nonce is fresh CSPRNG output for AES-256-GCM. The preceding seven
+members form its exact AAD.
 
 The encrypted inner state contains the exact role, carrier, mailbox identifier,
 membership bearer, peer key, local signing state, monitor projection, and
@@ -1924,7 +1925,11 @@ state SHALL be unexpired or use the permitted post-payload `null` value.
 It SHALL reject extras, trailing bytes, wrong roles, wrong applications, wrong
 ceremonies, changed generations, or failed AEAD before endpoint construction.
 
-The allocator SHALL checkpoint from carrier allocation until terminal receipt.
+The allocator SHALL checkpoint from carrier allocation until terminal receipt
+or its numeric expiry. After allocator expiry, only the browser's independent
+hub-pending and inactive-staging state can drive signed status recovery. An
+expired allocator checkpoint cannot authorize another payload, hub effect, or
+receipt.
 The claimant SHALL first checkpoint after final approval and before its first
 consumer identity effect. A preliminary decision never becomes a checkpointed
 effect capability.
@@ -1941,9 +1946,10 @@ a new transition against a peer or hub that advanced.
 
 Terminal decline, pre-payload refusal, pre-payload expiry, and verified receipt
 erase the checkpoint. Relay or offer expiry after durable payload send does not
-erase the claimant checkpoint. It remains sealed and non-authorizing until a
-verified receipt, explicit application unlink, or root-lifecycle purge. The
-verified receipt can use the ordinary or recovered path.
+erase the claimant checkpoint. Its null expiry remains sealed and
+non-authorizing until a verified receipt, explicit application unlink, or
+root-lifecycle purge. The verified receipt can use the ordinary or recovered
+path. The allocator never inherits that null-expiry retention rule.
 An attempted post-payload refusal is invalid input. It does not advance or erase
 the retained `payload -> receipt` checkpoint.
 The allocator wrapping key derives from its persisted installation seed. The
@@ -2149,9 +2155,9 @@ pointer, one current hub pointer, and one current test set.
 The current test set contains TEST-001 through TEST-029 and TEST-060 through
 TEST-067. No trajectory test supplies current authority.
 
-The current consumer is Selfsame SPEC-008 0.5.4-draft. The current safety
-authority is Selfsame SPEC-007 0.3.2-draft. The current hub design is cbcl-bus
-SPEC-053 0.17.4-draft.
+The current consumer is Selfsame SPEC-008 0.5.5-draft. The current safety
+authority is Selfsame SPEC-007 0.3.3-draft. The current hub design is cbcl-bus
+SPEC-053 0.17.5-draft.
 
 All four coordinated parents record the same generation metadata and review
 set.
@@ -2214,6 +2220,13 @@ final approval, payload construction, consumer identity work, or receipt.
 Fill the sealed ciphertext to 69,632 octets and accept it. Refuse zero length,
 69,633 octets, extra members, trailing bytes, non-canonical CBOR, nonce reuse,
 and expired state.
+
+Require every allocator checkpoint to retain its numeric expiry. Substitute
+`null` at every allocator state and require refusal before endpoint recovery.
+For the claimant, require numeric expiry before durable payload send and `null`
+only after that send. Cross relay expiry in both roles. Require allocator
+checkpoint expiry and browser-owned status recovery. Require claimant retention
+until ordinary or recovered receipt, explicit unlink, or root-lifecycle purge.
 
 Inspect checkpoints, logs, errors, traces, heap retention, and terminal erasure.
 No wrapping key, presence token, application key, issuer key, or grant key
@@ -2338,7 +2351,12 @@ required Tier-1 review.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.5.3-draft</summary>
+<summary>Revision history — 0.1.0 → 0.5.4-draft</summary>
+
+- 0.5.4-draft — limits null checkpoint expiry to the claimant after durable
+  payload send. The allocator keeps its numeric expiry and defers post-expiry
+  status recovery to browser-owned hub state. No production action is
+  authorized.
 
 - 0.5.3-draft — assigns every credential/v2 object kind its exact integer. It
   names the checkpoint ceremony member and prohibits post-payload refusal.
