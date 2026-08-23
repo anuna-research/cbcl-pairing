@@ -4,7 +4,7 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.0-draft
+version: 0.5.1-draft
 last-updated: 2026-08-24
 owner-repo: cbcl-pairing
 implementation-status: credential-v1-local-complete; credential-v2-unimplemented
@@ -14,13 +14,13 @@ derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574ed
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
 authority-form: consolidated-current-protocol-and-consumer-pointer
-consumer-design: selfsame SPEC-008 0.5.1-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.1-draft
-coordinated-rendezvous-design: did-crdt SPEC-037 0.1.0-draft
+consumer-design: selfsame SPEC-008 0.5.2-draft
+coordinated-safety-design: selfsame SPEC-007 0.3.0-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.2-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> rejected pointer-only 0.4.12 -> direct 0.5.0 protocol reissue"
+generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> direct 0.5.0 reissue -> rejected 0.5.1 coordinated review -> single carrier ceremony reissue"
 ---
 
 # SPEC-001 — reusable blind pairing
@@ -1480,7 +1480,13 @@ Only `C` enters CPace. Only `T` authenticates the claimant mailbox admission.
 The carrier and presence input cannot substitute for each other.
 
 The allocator SHALL generate one fresh 32-octet mailbox identifier `M`. It
-SHALL also generate fresh independent `C` and `T` values for each ceremony.
+SHALL also generate a fresh 32-octet `carrierCeremonyId`. It SHALL generate
+fresh independent `C` and `T` values for each ceremony.
+
+The carrier ceremony ID is the sole credential/v2 ceremony identifier. The
+hub, both endpoints, every envelope, the authenticated display authority, and
+status recovery use that exact value. No consumer allocates a second ceremony
+identifier.
 
 The allocator SHALL commit `T` with this exact construction:
 
@@ -1636,7 +1642,7 @@ credential-v2-carrier = {
   "profile-version": 2,
   "relay-origin": relay-origin,
   "locator": bstr .size 32,
-  "ceremony-id": bstr .size 32,
+  "carrier-ceremony-id": bstr .size 32,
   "carrier-nonce": bstr .size 32,
   "claim-commitment": bstr .size 32,
   "relay-expires-at": uint,
@@ -1674,9 +1680,9 @@ credential-v2-ad = [
 ]
 ```
 
-The final three `ci` byte strings are mailbox identifier, ceremony identifier,
-and claim commitment. The two prior byte strings are profile and carrier
-digests.
+The final three `ci` byte strings are mailbox identifier, carrier ceremony
+identifier, and claim commitment. The two prior byte strings are profile and
+carrier digests.
 
 The public context fixes version, suite, profile, application, both digests,
 relay, mailbox, ceremony, commitment, expected allocator key, and absent
@@ -1714,7 +1720,7 @@ credential-v2-object = credential-v2-control-object / credential-v2-large-object
 
 credential-v2-control-object = {
   0: 2,
-  1: 1..8 / 10,
+  1: 1..8,
   2: bstr .size 32,
   3: 1..2048,
   4: bstr .size 4096
@@ -1722,7 +1728,7 @@ credential-v2-control-object = {
 
 credential-v2-large-object = {
   0: 2,
-  1: 0 / 9,
+  1: 0 / 9 / 10,
   2: bstr .size 32,
   3: 1..62000,
   4: bstr .size 64512
@@ -1733,8 +1739,24 @@ Kinds are `offer`, `intent-approve`, `intent-decline`, `preparation`,
 `comparison-confirmed`, `binding-confirmed`, `refusal`, `final-approve`,
 `final-decline`, `payload`, and `receipt`.
 
-Only `offer` and `payload` use the large arm. Every other kind uses the control
-arm.
+Only `offer`, `payload`, and `receipt` use the large arm. Every other kind uses
+the control arm. The receipt needs the large arm for the closed signed hub
+status that authorizes installation.
+
+The receipt logical body is this deterministic-CBOR map:
+
+```cddl
+credential-v2-receipt-body = {
+  "carrier-ceremony-id": bstr .size 32,
+  "predecessor-hash": bstr .size 32,
+  "final-status-jws": tstr .size (1..8192),
+  "final-status-digest": bstr .size 32
+}
+```
+
+The JWS text contains only compact-JWS ASCII. The digest is raw SHA-256 over
+the JWS payload's exact RFC-8785 octets. Unknown members, another ceremony,
+another predecessor, invalid ASCII, or a digest mismatch refuse installation.
 
 Field 2 contains one `intentDigest`. Field 3 contains the logical body length.
 The remaining field-4 bytes are zero.
@@ -1767,8 +1789,8 @@ intent-decline | final-decline | receipt | refusal -> terminal
 Allocator sends offer, comparison, binding, receipt, and allocator refusal.
 Claimant sends both decisions, preparation, payload, and claimant refusal.
 
-Each control binds sender, ceremony, kind, intent digest, body digest, body
-length, and predecessor. Only exact retransmission is idempotent.
+Each control binds sender, carrier ceremony, kind, intent digest, body digest,
+body length, and predecessor. Only exact retransmission is idempotent.
 
 ### CON-029: Opaque authenticated credential/v2 display
 
@@ -1781,8 +1803,9 @@ the wire `authority_summary` on its consent surface.
 The credential/v2 endpoint constructor SHALL take a separate borrowed
 `CredentialV2IntentAuthority` supplied by the consumer. It SHALL expose typed
 read-only accessors for authenticated application ID, HTTPS origin, and relay
-origin. It SHALL also expose account provenance, permissions, device binding,
-exact-pair TOFU state, transition, and signed offer-core digest.
+origin. It SHALL also expose the carrier ceremony ID, account provenance,
+permissions, device binding, exact-pair TOFU state, transition, and signed
+offer-core digest.
 
 The profile first parses one bounded peer `CredentialV2IntentInput`. Before any
 display allocation, it SHALL require byte equality between every overlapping
@@ -1836,6 +1859,70 @@ before display construction.
 
 The profile does not decide account authority, room eligibility, migration,
 DID derivation, grant issuance, or browser persistence.
+
+### CON-030: Credential/v2 endpoint checkpoints preserve in-flight authority
+
+`EndpointCheckpointV2` SHALL have private fields and no `Debug`, `Clone`,
+generic serialization, or plaintext export. The protocol library SHALL seal
+and open it only with a consumer-supplied 32-octet wrapping key.
+
+The checkpoint key is HKDF-SHA512 over that wrapping key. Its salt is the raw
+carrier ceremony ID. Its info is deterministic CBOR containing the label
+`cbcl-pairing checkpoint key/v2`, endpoint role, and application context.
+
+The sealed checkpoint has this deterministic-CBOR outer shape:
+
+```cddl
+credential-v2-checkpoint = [
+  "cbcl-pairing-endpoint-checkpoint/v2",
+  2,
+  "allocator" / "claimant",
+  "anuna.io/credential/v2",
+  bstr .size 32,
+  uint,
+  uint,
+  bstr .size 12,
+  bstr .size (1..69632)
+]
+```
+
+The two integers are checkpoint generation and expiry. The nonce is fresh
+CSPRNG output for AES-256-GCM. The preceding seven members form its exact AAD.
+
+The encrypted inner state contains the exact role, carrier, mailbox identifier,
+membership bearer, peer key, local signing state, monitor projection, and
+transcript. It also contains traffic keys, IVs, counters, intent digest,
+predecessor hashes, accepted decisions, and any cached exact outbound frame.
+It contains no consumer key, derived application key, issuer key, or grant key.
+
+An allocator checkpoint before Finished MAY contain its live `C` and `T`.
+The first checkpoint after claimant admission erases `T`. The first checkpoint
+after both Finished values erases `C`. No claimant checkpoint contains either.
+
+The library recognizer SHALL require complete deterministic-CBOR decoding,
+the exact outer bindings, a strictly positive generation, and unexpired state.
+It SHALL reject extras, trailing bytes, wrong roles, wrong applications, wrong
+ceremonies, changed generations, or failed AEAD before endpoint construction.
+
+The allocator SHALL checkpoint from carrier allocation until terminal receipt.
+The claimant SHALL first checkpoint after final approval and before its first
+consumer identity effect. A preliminary decision never becomes a checkpointed
+effect capability.
+
+Before a state-changing outbound frame, the endpoint SHALL expose its next
+checkpoint and exact cached frame as one ordered effect. The consumer persists
+the checkpoint atomically before sending the frame. Resume retransmits only
+that cached frame and advances only through ordinary idempotent recognition.
+
+An inbound replay after recovery either reproduces the same next effect or
+refuses. It cannot repeat a consumer decision, payload construction, receipt,
+or application effect. An old checkpoint can cause refusal but cannot authorize
+a new transition against a peer or hub that advanced.
+
+Terminal decline, refusal, expiry, and verified receipt erase the checkpoint.
+The allocator wrapping key derives from its persisted installation seed. The
+claimant wrapping key derives inside unlocked custody with the application and
+carrier ceremony as context. Neither raw wrapping key enters the checkpoint.
 
 ### ADR-024: Reusable protocol types carry authentication, not application policy
 
@@ -1909,23 +1996,83 @@ Accept control lengths 1, 23, 24, 255, 256, 2,047, and 2,048. Refuse 0, 2,049,
 Accept large lengths through 62,000 and refuse 62,001. Require exact encoded
 object lengths for every integer-head boundary.
 
+Require offer, payload, and receipt to use only the large arm. Require every
+other kind to use only the control arm. A receipt encoded as control refuses.
+
 Require one current credential/v2 protocol section, one current consumer
 pointer, one current hub pointer, and one current test set.
 
 The current test set contains TEST-001 through TEST-029 and TEST-060 through
-TEST-063. No trajectory test supplies current authority.
+TEST-065. No trajectory test supplies current authority.
 
-The current consumer is Selfsame SPEC-008 0.5.1-draft. The current hub design
-is cbcl-bus SPEC-053 0.17.1-draft.
+The current consumer is Selfsame SPEC-008 0.5.2-draft. The current safety
+authority is Selfsame SPEC-007 0.3.0-draft. The current hub design is cbcl-bus
+SPEC-053 0.17.2-draft.
 
-The coordinated review also includes did-crdt SPEC-037 0.1.0-draft. All four
-parents record the same generation metadata and review set.
+All four coordinated parents record the same generation metadata and review
+set.
 
 A qualifying reviewer uses another model family and a fresh session. The
 report records model, authentication path, session, and Circus attempt.
 
 A fresh Tier-1 PASS authorizes only the Elephant SPL and test-first plan. It
 authorizes no production allocation, release, or deployment.
+
+### TEST-064: One carrier ceremony identifier governs every v2 binding
+
+**Validates:** [[SPEC-001-reusable-blind-pairing#REQ-031]],
+[[SPEC-001-reusable-blind-pairing#CON-027]], and
+[[SPEC-001-reusable-blind-pairing#CON-029]].
+
+Generate one carrier with a fresh carrier ceremony ID. Require the CPace
+context, every envelope, authority input, display, offer, hub command, status,
+and receipt to carry that exact 32-octet value.
+
+Place the signed immutable hub status in the receipt's large logical body.
+Accept the 8,192-octet status bound with its receipt framing. Refuse a control
+arm, a body above 62,000 octets, or a changed status digest.
+
+Require the exact receipt map, carrier ceremony, predecessor, compact-JWS
+ASCII, and raw payload digest. Refuse every missing, extra, duplicated, or
+non-canonical member before a receipt effect.
+
+Mutate each occurrence independently. Require refusal before display,
+decision, payload, status rebind, or identity effect.
+
+Add the retired `ceremony-id` member, omit `carrier-ceremony-id`, or add a
+consumer-generated second identifier. Require complete carrier recognition to
+refuse with no relay allocation or endpoint state.
+
+Re-run carrier canonical-CBOR roundtrip and fuzz cases. Require duplicate keys,
+extras, trailing bytes, wrong lengths, and non-canonical encodings to refuse.
+
+### TEST-065: Endpoint recovery cannot duplicate authority or effects
+
+**Validates:** [[SPEC-001-reusable-blind-pairing#CON-030]].
+
+Checkpoint the allocator at every state from carrier allocation through
+receipt. Checkpoint the claimant after final approval and before each later
+transition. Restore each role with the exact key and bindings.
+
+Crash before checkpoint persistence, after persistence, before send, after
+send, before receive persistence, and after receive persistence. Require exact
+cached retransmission, one monotonic state projection, and one terminal receipt.
+
+Mutate each outer member, ciphertext octet, wrapping key, role, application,
+ceremony, generation, expiry, counter, monitor state, predecessor, and cached
+frame. Require refusal before endpoint construction or a protocol effect.
+
+Restore an old valid checkpoint against every advanced peer state. Require
+only exact idempotent replay or terminal refusal. Never repeat preliminary or
+final approval, payload construction, consumer identity work, or receipt.
+
+Fill the sealed ciphertext to 69,632 octets and accept it. Refuse zero length,
+69,633 octets, extra members, trailing bytes, non-canonical CBOR, nonce reuse,
+and expired state.
+
+Inspect checkpoints, logs, errors, traces, heap retention, and terminal erasure.
+No wrapping key, presence token, application key, issuer key, or grant key
+survives outside its declared boundary.
 
 ## Production gates
 
@@ -2004,7 +2151,15 @@ required Tier-1 review.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.4.0-draft</summary>
+<summary>Revision history — 0.1.0 → 0.5.1-draft</summary>
+
+- 0.5.1-draft — names one allocator-generated carrier ceremony ID as the sole
+  credential/v2 ceremony identifier. Adds sealed endpoint checkpoints. Removes
+  the unused rendezvous pointer and coordinates Selfsame SPEC-007 directly. No
+  production action is authorized.
+
+- 0.5.0-draft — restates credential/v2 protocol and current consumer authority
+  directly after the pointer-only review rejection.
 
 - 0.4.0-draft — preserves the unchanged credential/v2 protocol body through
   0.4.8 and moves the current consumer pointer into this parent. The
