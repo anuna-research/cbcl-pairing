@@ -10,6 +10,7 @@ pub mod cbcl_protocol;
 pub mod channel;
 pub mod context;
 pub mod cpace;
+pub mod credential_v2;
 pub mod endpoint;
 pub mod limiter;
 pub mod mailbox;
