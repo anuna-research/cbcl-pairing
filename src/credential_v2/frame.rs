@@ -41,6 +41,15 @@ impl CredentialV2Frame {
         Ok(Self::Cpace(message.clone()))
     }
 
+    /// Borrow the authenticated CPace message when this is a CPace frame.
+    #[must_use]
+    pub const fn cpace_message(&self) -> Option<&CpaceMessage> {
+        match self {
+            Self::Cpace(message) => Some(message),
+            _ => None,
+        }
+    }
+
     /// Return the sealed direction when this is an application frame.
     #[must_use]
     pub const fn direction(&self) -> Option<Direction> {

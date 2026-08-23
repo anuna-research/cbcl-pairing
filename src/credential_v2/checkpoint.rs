@@ -30,6 +30,10 @@ impl CredentialV2CheckpointNonce {
     pub const fn from_csprng(value: [u8; 12]) -> Self {
         Self(value)
     }
+
+    pub(super) const fn into_bytes(self) -> [u8; 12] {
+        self.0
+    }
 }
 
 /// Sealed deterministic credential/v2 endpoint checkpoint.
@@ -70,6 +74,99 @@ impl EndpointCheckpointV2 {
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
+
+    pub(super) fn from_bytes(bytes: Vec<u8>) -> Self {
+        Self { bytes }
+    }
+}
+
+pub(super) struct OpenedCheckpoint {
+    pub(super) plaintext: Zeroizing<Vec<u8>>,
+    pub(super) expiry: Option<u64>,
+    pub(super) nonce: [u8; 12],
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn seal_checkpoint_plaintext(
+    plaintext: &[u8],
+    side: Side,
+    carrier: &CredentialV2Carrier,
+    wrapping_key: &[u8; 32],
+    generation: u64,
+    expiry: Option<u64>,
+    nonce: [u8; 12],
+) -> Result<EndpointCheckpointV2, CredentialV2Error> {
+    if plaintext.is_empty() || plaintext.len() > MAX_PLAINTEXT {
+        return Err(CredentialV2Error::Size);
+    }
+    let aad = checkpoint_aad(side, carrier.carrier_ceremony_id(), generation, expiry)?;
+    let key = derive_key(side, carrier.carrier_ceremony_id(), wrapping_key)?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key.as_slice()).map_err(|_| CredentialV2Error::KeySchedule)?;
+    let aes_nonce = nonce.into();
+    let ciphertext = cipher
+        .encrypt(
+            &aes_nonce,
+            Payload {
+                msg: plaintext,
+                aad: &aad,
+            },
+        )
+        .map_err(|_| CredentialV2Error::Authentication)?;
+    if ciphertext.is_empty() || ciphertext.len() > MAX_CIPHERTEXT {
+        return Err(CredentialV2Error::Size);
+    }
+    Ok(EndpointCheckpointV2::from_bytes(encode_outer(
+        side,
+        carrier.carrier_ceremony_id(),
+        generation,
+        expiry,
+        nonce,
+        ciphertext,
+    )?))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn open_checkpoint_plaintext(
+    input: &[u8],
+    wrapping_key: &[u8; 32],
+    expected_side: Side,
+    expected_carrier: &CredentialV2Carrier,
+    expected_generation: u64,
+    now: u64,
+) -> Result<OpenedCheckpoint, CredentialV2Error> {
+    let outer = decode_outer(input)?;
+    if outer.side != expected_side
+        || outer.ceremony != *expected_carrier.carrier_ceremony_id()
+        || outer.generation == 0
+        || outer.generation != expected_generation
+    {
+        return Err(CredentialV2Error::Profile);
+    }
+    if outer.expiry.is_some_and(|expiry| now >= expiry) {
+        return Err(CredentialV2Error::Expired);
+    }
+    let aad = checkpoint_aad(outer.side, &outer.ceremony, outer.generation, outer.expiry)?;
+    let key = derive_key(outer.side, &outer.ceremony, wrapping_key)?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key.as_slice()).map_err(|_| CredentialV2Error::KeySchedule)?;
+    let aes_nonce = outer.nonce.into();
+    let plaintext = Zeroizing::new(
+        cipher
+            .decrypt(
+                &aes_nonce,
+                Payload {
+                    msg: &outer.ciphertext,
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| CredentialV2Error::Authentication)?,
+    );
+    Ok(OpenedCheckpoint {
+        plaintext,
+        expiry: outer.expiry,
+        nonce: outer.nonce,
+    })
 }
 
 impl CredentialV2Endpoint {
@@ -101,42 +198,18 @@ impl CredentialV2Endpoint {
         }
 
         let plaintext = encode_inner(self, channel, generation, nonce.0)?;
-        if plaintext.is_empty() || plaintext.len() > MAX_PLAINTEXT {
-            return Err(CredentialV2Error::Size);
-        }
-        let aad = checkpoint_aad(
+        let checkpoint = seal_checkpoint_plaintext(
+            plaintext.as_slice(),
             self.side,
-            self.carrier.carrier_ceremony_id(),
-            generation,
-            expiry,
-        )?;
-        let key = derive_key(self.side, self.carrier.carrier_ceremony_id(), wrapping_key)?;
-        let cipher = Aes256Gcm::new_from_slice(key.as_slice())
-            .map_err(|_| CredentialV2Error::KeySchedule)?;
-        let aes_nonce = nonce.0.into();
-        let ciphertext = cipher
-            .encrypt(
-                &aes_nonce,
-                Payload {
-                    msg: plaintext.as_slice(),
-                    aad: &aad,
-                },
-            )
-            .map_err(|_| CredentialV2Error::Authentication)?;
-        if ciphertext.is_empty() || ciphertext.len() > MAX_CIPHERTEXT {
-            return Err(CredentialV2Error::Size);
-        }
-        let bytes = encode_outer(
-            self.side,
-            self.carrier.carrier_ceremony_id(),
+            &self.carrier,
+            wrapping_key,
             generation,
             expiry,
             nonce.0,
-            ciphertext,
         )?;
         self.checkpoint_generation = generation;
         self.checkpoint_nonce = Some(nonce.0);
-        Ok(EndpointCheckpointV2 { bytes })
+        Ok(checkpoint)
     }
 
     /// Open a checkpoint only under exact caller-held bindings.
@@ -150,45 +223,26 @@ impl CredentialV2Endpoint {
         now: u64,
         body_verifier: Box<dyn CredentialV2BodyVerifier>,
     ) -> Result<RestoredCredentialV2Endpoint, CredentialV2Error> {
-        let outer = decode_outer(input)?;
-        if outer.side != expected_side
-            || outer.ceremony != *expected_carrier.carrier_ceremony_id()
-            || outer.generation == 0
-            || outer.generation != expected_generation
-        {
-            return Err(CredentialV2Error::Profile);
-        }
-        if outer.expiry.is_some_and(|expiry| now >= expiry) {
-            return Err(CredentialV2Error::Expired);
-        }
-        let aad = checkpoint_aad(outer.side, &outer.ceremony, outer.generation, outer.expiry)?;
-        let key = derive_key(outer.side, &outer.ceremony, wrapping_key)?;
-        let cipher = Aes256Gcm::new_from_slice(key.as_slice())
-            .map_err(|_| CredentialV2Error::KeySchedule)?;
-        let aes_nonce = outer.nonce.into();
-        let plaintext = Zeroizing::new(
-            cipher
-                .decrypt(
-                    &aes_nonce,
-                    Payload {
-                        msg: &outer.ciphertext,
-                        aad: &aad,
-                    },
-                )
-                .map_err(|_| CredentialV2Error::Authentication)?,
-        );
-        let (endpoint, channel) = decode_inner(
-            plaintext.as_slice(),
+        let opened = open_checkpoint_plaintext(
+            input,
+            wrapping_key,
             expected_side,
             expected_carrier,
             expected_generation,
-            outer.nonce,
+            now,
+        )?;
+        let (endpoint, channel) = decode_inner(
+            opened.plaintext.as_slice(),
+            expected_side,
+            expected_carrier,
+            expected_generation,
+            opened.nonce,
             body_verifier,
         )?;
         validate_checkpoint_phase(
             endpoint.side,
             endpoint.phase,
-            outer.expiry,
+            opened.expiry,
             endpoint.carrier.relay_expires_at(),
             now,
         )?;

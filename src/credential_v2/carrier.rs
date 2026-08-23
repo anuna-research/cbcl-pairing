@@ -128,6 +128,17 @@ impl CredentialV2Presence {
     pub fn take_claim_token(&mut self) -> Result<ClaimToken, CredentialV2Error> {
         self.claim_token.take().ok_or(CredentialV2Error::Terminal)
     }
+
+    pub(super) fn checkpoint_parts(&self) -> (&[u8; 16], Option<&ClaimToken>) {
+        (&self.cpace_secret, self.claim_token.as_ref())
+    }
+
+    pub(super) fn from_checkpoint(cpace_secret: [u8; 16], claim_token: Option<[u8; 16]>) -> Self {
+        Self {
+            cpace_secret: Zeroizing::new(cpace_secret),
+            claim_token: claim_token.map(ClaimToken::new),
+        }
+    }
 }
 
 impl fmt::Debug for CredentialV2Presence {
