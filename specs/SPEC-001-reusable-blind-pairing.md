@@ -4,22 +4,23 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.4.0-draft
-last-updated: 2026-08-23
+version: 0.5.0-draft
+last-updated: 2026-08-24
 owner-repo: cbcl-pairing
-implementation-status: local-complete
+implementation-status: credential-v1-local-complete; credential-v2-unimplemented
 implementation-baseline: c22f2d0526432c01c56d64be35a8d4f87516ec92
 documentation-baseline: b2a9df8166bf92be8e2207f84830e03c9db9f750
 derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574edc8
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
-authority-form: consolidated-current-consumer-pointer; credential-v2 protocol ancestry through 0.4.8 is preserved; 0.4.9 through 0.4.12 pointer instruments are historical only
-consumer-design: selfsame SPEC-008 0.5.0-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.0-draft
+authority-form: consolidated-current-protocol-and-consumer-pointer
+consumer-design: selfsame SPEC-008 0.5.1-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.1-draft
+coordinated-rendezvous-design: did-crdt SPEC-037 0.1.0-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "unchanged credential/v2 body through 0.4.8 -> pointer reviews through 0.4.12 -> N11 stopping rule -> consolidated parent pointer"
+generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> rejected pointer-only 0.4.12 -> direct 0.5.0 protocol reissue"
 ---
 
 # SPEC-001 — reusable blind pairing
@@ -1460,29 +1461,468 @@ Lattice ABE remains an application-authorization overlay, not a pairing suite.
 Selection requires complete encodings, size measurements, independent vectors,
 interoperability, downgrade analysis, and human cryptography review.
 
-## Credential/v2 consumer coordination
+## Credential/v2 current protocol
 
-This parent is the sole current cbcl-pairing consumer pointer for the
-credential/v2 increment. Trajectory pointer amendments and review dispositions
-provide evidence and no normative precedence.
+This section states the complete current credential/v2 protocol directly.
+Trajectory documents provide synthesis evidence and no protocol authority.
 
-The protocol body remains the unchanged credential/v2 body recorded through
-the reviewed 0.4.8 increment. This reissue changes no wire byte, carrier,
-presence-code input, CPace context, sender rule, state rule, display-verifier
-boundary, envelope, cap, or test vector.
+### REQ-031: Credential/v2 uses protected admission and distinct human presence
 
-The exact current protocol test set contains TEST-030 through TEST-049. It also
-contains TEST-050 except its retired positive control witness. That witness
-remains a negative obligation: 4,096 octets refuses. TEST-051 through TEST-056
-and TEST-059 survive. TEST-057 and TEST-058 do not survive.
+The endpoint SHALL expose separate `CredentialV1Invitation` and
+`CredentialV2Invitation` types. Generic bytes, application text, or a caller
+version cannot select credential/v2.
 
-The current consumer design is Selfsame SPEC-008 CON-985 at parent version
-0.5.0-draft. The coordinated hub design is cbcl-bus SPEC-053 REQ-081 at parent
-version 0.17.0-draft.
+The credential/v2 machine carrier SHALL contain no CPace secret, claim bearer,
+or `PAIR1-` text. A separate typed presence input supplies raw sixteen-octet
+values `C` and `T`.
 
-The three parent specifications record the same generation family, version,
-and session. A qualifying review SHALL use another model family and a fresh
-session, record its authentication path, and review the three parents together.
+Only `C` enters CPace. Only `T` authenticates the claimant mailbox admission.
+The carrier and presence input cannot substitute for each other.
+
+The allocator SHALL generate one fresh 32-octet mailbox identifier `M`. It
+SHALL also generate fresh independent `C` and `T` values for each ceremony.
+
+The allocator SHALL commit `T` with this exact construction:
+
+```text
+claimCommitment = SHA-256(
+  UTF8("cbcl-pairing claim-v2 commitment\u0000") || M || T
+)
+```
+
+The relay SHALL install exactly one claimant after constant-time commitment
+comparison. Wrong bearers preserve mailbox state and return the closed unknown
+claim response.
+
+The relay SHALL remain application-unaware. It accepts no application,
+profile, PAKE, identity, consent, intent, or payload member.
+
+The CPace `PRS` is raw `C`. The CPace `sid` is raw `M`. Neither `T`, carrier
+bytes, nor `PAIR1-` text enters `PRS`.
+
+Both Finished values SHALL verify before application traffic. Every secret is
+erased after terminal success or failure.
+
+After Finished, one intent digest SHALL bind the offer, both decisions,
+preparation, comparison result, reverse payload, and receipt. Wrong sender,
+predecessor, digest, or state is terminal.
+
+Preliminary approval can authorize only the consumer's declared preview
+effect. Final approval can authorize only the matching consumer payload.
+
+Credential/v1 retains its existing carrier secret, CPace schedule, display,
+wire bytes, and decisions. Neither version retries or relabels the other.
+
+### NFR-023: Credential/v2 work, storage, and typed display stay bounded
+
+V2 admission work SHALL depend only on the addressed mailbox. It SHALL NOT
+scan unrelated mailboxes, bodies, expiries, memberships, or limiter entries.
+
+The relay retains at most one 32-octet commitment per waiting v2 mailbox. It
+never persists `T` and never exposes either secret through observability.
+
+The v2 mailbox lifetime remains between 60 and 600 seconds. The shared relay
+message ceiling remains 70,000 octets.
+
+Control logical bodies contain 1 through 2,048 octets. Large logical bodies
+contain 1 through 62,000 octets.
+
+The control padding field contains exactly 4,096 octets. The large padding
+field contains exactly 64,512 octets.
+
+Typed transition recognition precedes every owned display allocation. The
+recognizer checks authentication, shape, length, count, uniqueness, order, and
+aggregate size before cloning.
+
+The exact legacy-handle cap is 33 ASCII octets. The exact room cap is 129
+ASCII octets.
+
+A transition contains at most 256 unique rooms in unsigned UTF-8 order. Its
+RFC-8785 room-array cap is 33,793 octets.
+
+The compatibility manifest SHALL hash every normative schema, dialect, positive
+vector, negative vector, and state vector. Two independent endpoints reproduce
+the same bytes and verdicts.
+
+### CON-026: Protected v2 mailbox wire and persisted state
+
+The current v2 relay additions are these deterministic-CBOR variants:
+
+```cddl
+client-message /= allocate-v2 / claim-v2
+server-message /= allocated-v2 / claimed-v2
+
+allocate-v2 = {
+  "type": "allocate-v2",
+  "mailbox-id": bstr .size 32,
+  "claim-commitment": bstr .size 32,
+  ? "ttl-seconds": 60..600
+}
+
+claim-v2 = {
+  "type": "claim-v2",
+  "mailbox-id": bstr .size 32,
+  "claim-token": bstr .size 16
+}
+
+allocated-v2 = {
+  "type": "allocated-v2",
+  "mailbox-id": bstr .size 32,
+  "membership-token": bstr .size 32,
+  "expires-at": uint
+}
+
+claimed-v2 = {
+  "type": "claimed-v2",
+  "mailbox-id": bstr .size 32,
+  "membership-token": bstr .size 32,
+  "expires-at": uint
+}
+```
+
+The committed schema contains one closed client union and one closed server
+union. Duplicate keys, extras, trailing bytes, and non-canonical encoding
+refuse before relay effects.
+
+The pure v2 admission states are `V2Pending(commitment)`, `V2Claimed`, and
+`V2Closed`. Legacy mailboxes retain `V1CrowdOnThird`.
+
+A matching claim atomically installs one membership hash, erases the
+commitment, persists `V2Claimed`, and emits `claimed-v2`. A failed claim changes
+none of those values.
+
+The canonical v2 store record is:
+
+```cddl
+mailbox-store-v2 = [
+  "cbcl-pairing-mailbox-store/v2",
+  bstr .size 32,
+  null / 0..999999999,
+  uint,
+  store-status,
+  [1*2 bstr .size 32],
+  [* store-sequence],
+  [0] / [1, bstr .size 32] / [2] / [3]
+]
+
+store-status = [0] / [1] / [2, 0..3]
+store-sequence = [
+  0..1,
+  0..15,
+  bstr .size 32,
+  1..69632,
+  null / bstr .size (1..69632)
+]
+```
+
+Admission `[0]` is legacy v1. Admission `[1, H]` is pending v2. Admission `[2]`
+is claimed v2, and `[3]` is closed v2.
+
+Status `[0]` is waiting. Status `[1]` is paired. Status `[2, reason]` is
+terminal with the closed reason enumeration.
+
+A missing v2 admission field never becomes v1. An inconsistent or malformed
+v2 record fails startup.
+
+### CON-027: Credential/v2 carrier and CPace channel
+
+The credential/v2 carrier is a separate deterministic-CBOR rule:
+
+```cddl
+credential-v2-carrier = {
+  "version": 2,
+  "profile": "anuna.io/credential/v2",
+  "application-context": application-id-v2,
+  "profile-version": 2,
+  "relay-origin": relay-origin,
+  "locator": bstr .size 32,
+  "ceremony-id": bstr .size 32,
+  "carrier-nonce": bstr .size 32,
+  "claim-commitment": bstr .size 32,
+  "relay-expires-at": uint,
+  ? "expected-allocator-key": bstr .size 32
+}
+
+application-id-v2 = tstr .size (1..2048)
+```
+
+The application identifier also satisfies the consumer's canonical HTTPS
+grammar. The relay origin satisfies the canonical origin grammar.
+
+Extra keys, duplicate keys, trailing bytes, nameplates, secrets, and indirect
+locators refuse. The carrier expiry equals the successful allocation response.
+
+`carrierDigest` is SHA-256 over the exact canonical carrier bytes. Both peers
+authenticate their independently recognised profile and this digest.
+
+The deterministic-CBOR CPace context is:
+
+```cddl
+credential-v2-ci = [
+  "cbcl-pairing-ci/credential-v2", 2, "CPACE25519-SHA512-D21",
+  "anuna.io/credential/v2", application-id-v2,
+  bstr .size 32, bstr .size 32, relay-origin,
+  bstr .size 32, bstr .size 32, bstr .size 32,
+  ["allocator", "claimant"]
+]
+
+credential-v2-ad = [
+  "cbcl-pairing-ad/credential-v2", "allocator" / "claimant",
+  bstr .size 32 / null,
+  bstr .size 32,
+  bstr .size 32
+]
+```
+
+The final three `ci` byte strings are mailbox identifier, ceremony identifier,
+and claim commitment. The two prior byte strings are profile and carrier
+digests.
+
+The public context fixes version, suite, profile, application, both digests,
+relay, mailbox, ceremony, commitment, expected allocator key, and absent
+claimant key.
+
+The transcript hash is SHA-512 over deterministic CBOR containing public
+context and both CPace frames. The key schedule uses HKDF-SHA512.
+
+The exact label strings are:
+
+```text
+pairing-credential-v2 kc A
+pairing-credential-v2 kc B
+pairing-credential-v2 key A-B
+pairing-credential-v2 key B-A
+pairing-credential-v2 iv A-B
+pairing-credential-v2 iv B-A
+pairing-credential-v2 exporter
+pairing-credential-v2 finished A
+pairing-credential-v2 finished B
+```
+
+V2 uses AES-256-GCM and contiguous directional counters. Its AAD binds version
+2, direction, counter, and the 64-octet transcript hash.
+
+No v1 context, label, key, Finished value, or AAD authenticates a v2 frame.
+
+### CON-028: Credential/v2 envelope and state machine
+
+Every application plaintext uses one of these disjoint deterministic-CBOR
+arms:
+
+```cddl
+credential-v2-object = credential-v2-control-object / credential-v2-large-object
+
+credential-v2-control-object = {
+  0: 2,
+  1: 1..8 / 10,
+  2: bstr .size 32,
+  3: 1..2048,
+  4: bstr .size 4096
+}
+
+credential-v2-large-object = {
+  0: 2,
+  1: 0 / 9,
+  2: bstr .size 32,
+  3: 1..62000,
+  4: bstr .size 64512
+}
+```
+
+Kinds are `offer`, `intent-approve`, `intent-decline`, `preparation`,
+`comparison-confirmed`, `binding-confirmed`, `refusal`, `final-approve`,
+`final-decline`, `payload`, and `receipt`.
+
+Only `offer` and `payload` use the large arm. Every other kind uses the control
+arm.
+
+Field 2 contains one `intentDigest`. Field 3 contains the logical body length.
+The remaining field-4 bytes are zero.
+
+For a recognised proof-free offer core:
+
+```text
+offerCoreDigest = SHA-256(RFC8785(OfferCoreV2))
+intentDigest = SHA-256(
+  UTF8("selfsame credential/v2 intent\u0000") || offerCoreDigest
+)
+```
+
+Every successor repeats the same intent digest. Every successor logical body
+also carries the exact prior object content hash.
+
+The session projection is:
+
+```text
+begin -> offer
+offer -> intent-approve | intent-decline
+intent-approve -> preparation
+preparation -> comparison-confirmed | binding-confirmed | refusal
+comparison-confirmed | binding-confirmed -> final-approve | final-decline
+final-approve -> payload
+payload -> receipt | refusal
+intent-decline | final-decline | receipt | refusal -> terminal
+```
+
+Allocator sends offer, comparison, binding, receipt, and allocator refusal.
+Claimant sends both decisions, preparation, payload, and claimant refusal.
+
+Each control binds sender, ceremony, kind, intent digest, body digest, body
+length, and predecessor. Only exact retransmission is idempotent.
+
+### CON-029: Opaque authenticated credential/v2 display
+
+`DisplayIntent` and `DisplayField` SHALL have private fields. Public consumers
+receive only borrowed read access.
+
+Credential/v2 SHALL NOT use generic `DisplayField` values. It SHALL NOT expose
+the wire `authority_summary` on its consent surface.
+
+The credential/v2 endpoint constructor SHALL take a separate borrowed
+`CredentialV2IntentAuthority` supplied by the consumer. It SHALL expose typed
+read-only accessors for authenticated application ID, HTTPS origin, and relay
+origin. It SHALL also expose account provenance, permissions, device binding,
+exact-pair TOFU state, transition, and signed offer-core digest.
+
+The profile first parses one bounded peer `CredentialV2IntentInput`. Before any
+display allocation, it SHALL require byte equality between every overlapping
+peer value and the separate authority input. It SHALL also require the peer
+intent digest to bind the authority's signed offer-core digest.
+
+The injected consumer verifier receives immutable references to the parsed
+peer input and separate authority input. It returns only a closed verdict.
+
+The verifier cannot return, append, replace, or mutate display data. After
+success, only the profile constructs one owned `CredentialV2Display`. Every
+displayed value is copied from the authority input. No displayed value is
+copied from the peer input.
+
+The display contains authenticated application ID, HTTPS origin, relay origin,
+account assertion provenance, permissions, device binding, and exact-pair TOFU
+state. It also contains one closed transition.
+
+```text
+AccountTransition = NoTransition
+                  | PathAToB {
+                      legacyHandle,
+                      legacyKeyDigest,
+                      migrationRooms,
+                      roomSetDigest,
+                      migrationSnapshotDigest,
+                      snapshotNonce
+                    }
+```
+
+The application ID and transition come from the authenticated authority input.
+They are never copied from an unchecked counterpart claim.
+
+The first display can include only authenticated transition data. The later
+display adds the consumer's locally derived DID and fingerprint.
+
+The room grammar is:
+
+```text
+LegacyHandle = "@" 1*32( %x61-7A / DIGIT / "_" / "-" )
+
+CbclSymbolChar = ALPHA / DIGIT / "_" / "-" / "." / "/" / "!" /
+                 "?" / "+" / "*" / "<" / ">" / "=" / "@"
+RoomShape = "@" 1*( CbclSymbolChar )
+CanonicalRoomText = RoomShape with 2..129 ASCII octets
+```
+
+The serializer does not escape `/`. Unknown shape, excessive length,
+duplicate rooms, wrong order, excessive count, and excessive aggregate refuse
+before display construction.
+
+The profile does not decide account authority, room eligibility, migration,
+DID derivation, grant issuance, or browser persistence.
+
+### ADR-024: Reusable protocol types carry authentication, not application policy
+
+Protected admission, channel state, and typed display construction belong to
+the reusable protocol. Application account and migration decisions remain in
+the consumer verifier.
+
+The verdict-only verifier prevents the application from injecting display
+text. Private display fields prevent later substitution by a UI caller.
+
+Separate carrier and presence types make co-presence a protocol property. They
+also keep the blind relay free of application semantics.
+
+### TEST-060: Protected v2 mailbox admission is complete
+
+Exercise exact, wrong, missing, cross-mailbox, repeated, v1, and malformed claim
+bearers. Only the exact bearer installs one claimant and erases the commitment.
+
+Restart from every v1 and v2 admission state. Malformed or inconsistent v2
+state fails startup.
+
+Inject crashes before write, during write, before rename, after rename, and
+before response. Restart yields exactly pending or claimed state.
+
+Inspect snapshots, stores, heap retention, logs, metrics, traces, and errors.
+No claim bearer survives, and no commitment survives successful admission.
+
+### TEST-061: Credential/v2 cryptography and state are independently reproducible
+
+Two independent endpoints reproduce carrier, context, transcript, key schedule,
+Finished, AAD, ciphertext, object, content hash, and every terminal verdict.
+
+Mutate each carrier, context, role, digest, label, counter, sender, predecessor,
+kind, decision, and padding member independently. Every mutation fails before
+an unauthorized effect.
+
+Only exact retransmission is idempotent. Conflicting decisions, reordering,
+late frames, and post-terminal frames fail closed.
+
+### TEST-062: Typed display contains only authenticated bounded values
+
+Compile-fail fixtures attempt public display construction, generic v2 fields,
+verifier-returned display data, transition replacement, and serialized
+reconstruction. Every attempt fails.
+
+A recording verifier receives immutable peer and authority inputs. Refusal
+emits no display, and success reproduces only authenticated authority bytes.
+
+Give the peer and authority different application IDs, origins, relays,
+provenance, permissions, device bindings, transitions, offer-core digests, and
+intent digests one at a time. Every mismatch refuses before display allocation.
+
+Mutate application, origin, relay, provenance, permissions, binding,
+transition, room, digest, nonce, order, and cap. Every mutation refuses before
+display.
+
+Verify the screen has no peer `authority_summary`. Verify every displayed
+application and transition value comes from authenticated typed input.
+
+Construct every room-symbol branch and 256 distinct maximum rooms. Require the
+33,793-octet array and exact borrowed accessors.
+
+### TEST-063: Compatibility, bounds, and current authority are singular
+
+Re-run every base TEST-001 through TEST-029 outcome. Credential/v1 bytes,
+hashes, displays, stores, frames, and verdicts remain identical.
+
+Accept control lengths 1, 23, 24, 255, 256, 2,047, and 2,048. Refuse 0, 2,049,
+4,095, and 4,096.
+
+Accept large lengths through 62,000 and refuse 62,001. Require exact encoded
+object lengths for every integer-head boundary.
+
+Require one current credential/v2 protocol section, one current consumer
+pointer, one current hub pointer, and one current test set.
+
+The current test set contains TEST-001 through TEST-029 and TEST-060 through
+TEST-063. No trajectory test supplies current authority.
+
+The current consumer is Selfsame SPEC-008 0.5.1-draft. The current hub design
+is cbcl-bus SPEC-053 0.17.1-draft.
+
+The coordinated review also includes did-crdt SPEC-037 0.1.0-draft. All four
+parents record the same generation metadata and review set.
+
+A qualifying reviewer uses another model family and a fresh session. The
+report records model, authentication path, session, and Circus attempt.
 
 A fresh Tier-1 PASS authorizes only the Elephant SPL and test-first plan. It
 authorizes no production allocation, release, or deployment.
