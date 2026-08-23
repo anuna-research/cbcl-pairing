@@ -103,21 +103,23 @@ pub struct CredentialV2RecoveredReceiptAuthority {
 }
 
 #[derive(Debug)]
-struct LastObject {
-    sender: Side,
-    bytes: Vec<u8>,
-    content_hash: [u8; 32],
+pub(super) struct LastObject {
+    pub(super) sender: Side,
+    pub(super) bytes: Vec<u8>,
+    pub(super) content_hash: [u8; 32],
 }
 
 /// Sender-, predecessor-, and intent-bound credential/v2 endpoint reducer.
 #[derive(Debug)]
 pub struct CredentialV2Endpoint {
-    side: Side,
-    carrier: CredentialV2Carrier,
-    phase: CredentialV2Phase,
-    intent_digest: Option<[u8; 32]>,
-    last: Option<LastObject>,
-    body_verifier: Box<dyn CredentialV2BodyVerifier>,
+    pub(super) side: Side,
+    pub(super) carrier: CredentialV2Carrier,
+    pub(super) phase: CredentialV2Phase,
+    pub(super) intent_digest: Option<[u8; 32]>,
+    pub(super) last: Option<LastObject>,
+    pub(super) body_verifier: Box<dyn CredentialV2BodyVerifier>,
+    pub(super) checkpoint_generation: u64,
+    pub(super) checkpoint_nonce: Option<[u8; 12]>,
 }
 
 impl CredentialV2Endpoint {
@@ -135,6 +137,8 @@ impl CredentialV2Endpoint {
             intent_digest: None,
             last: None,
             body_verifier,
+            checkpoint_generation: 0,
+            checkpoint_nonce: None,
         }
     }
 

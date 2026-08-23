@@ -5,6 +5,7 @@
 
 mod carrier;
 mod channel;
+mod checkpoint;
 mod context;
 mod display;
 mod endpoint;
@@ -16,6 +17,7 @@ pub use carrier::{
     CredentialV2Presence,
 };
 pub use channel::{PendingCredentialV2Channel, SecureCredentialV2Channel};
+pub use checkpoint::{CredentialV2CheckpointNonce, EndpointCheckpointV2};
 pub use context::CredentialV2Context;
 pub use display::{
     credential_v2_intent_digest, recognise_credential_v2_intent, CredentialV2AccountProvenance,
@@ -72,6 +74,8 @@ pub enum CredentialV2Error {
     Predecessor,
     /// An object is invalid in the endpoint's current phase.
     Phase,
+    /// A numeric relay or offer expiry is no longer live.
+    Expired,
 }
 
 impl fmt::Display for CredentialV2Error {

@@ -4,10 +4,11 @@ use cbcl_pairing::{
     credential_v2::{
         credential_v2_intent_digest, CredentialV2AccountProvenance, CredentialV2Advance,
         CredentialV2BodyVerifier, CredentialV2Carrier, CredentialV2CarrierInput,
-        CredentialV2DeviceBinding, CredentialV2Endpoint, CredentialV2Error,
-        CredentialV2IntentAuthority, CredentialV2IntentClaims, CredentialV2IntentInput,
-        CredentialV2IntentVerifier, CredentialV2Kind, CredentialV2LogicalBody, CredentialV2Object,
-        CredentialV2OfferParser, CredentialV2Phase, CredentialV2TofuState, CredentialV2Transition,
+        CredentialV2CheckpointNonce, CredentialV2DeviceBinding, CredentialV2Endpoint,
+        CredentialV2Error, CredentialV2IntentAuthority, CredentialV2IntentClaims,
+        CredentialV2IntentInput, CredentialV2IntentVerifier, CredentialV2Kind,
+        CredentialV2LogicalBody, CredentialV2Object, CredentialV2OfferParser, CredentialV2Phase,
+        CredentialV2TofuState, CredentialV2Transition,
     },
     wire::Side,
 };
@@ -355,6 +356,134 @@ fn test_067_recovery_mismatch_and_post_payload_refusal_leave_receipt_pending() {
         .recover_receipt(&receipt, authority)
         .expect("recovered receipt");
     assert_eq!(claimant.phase(), CredentialV2Phase::Terminal);
+}
+
+#[test]
+fn test_065_sealed_checkpoint_restores_exact_payload_receipt_wait() {
+    let (_, mut claimant, payload) = endpoints_at_payload();
+    let wrapping_key = [0xa1; 32];
+    let checkpoint = claimant
+        .seal_checkpoint(
+            &wrapping_key,
+            1,
+            None,
+            CredentialV2CheckpointNonce::from_csprng([0xa2; 12]),
+            1_800_000_800,
+        )
+        .expect("claimant retained checkpoint");
+
+    let mut restored = CredentialV2Endpoint::restore_checkpoint(
+        checkpoint.as_bytes(),
+        &wrapping_key,
+        Side::Claimant,
+        &carrier(),
+        1,
+        1_900_000_000,
+        Box::new(BodyVerifier::default()),
+    )
+    .expect("null-expiry payload checkpoint outlives relay");
+    assert_eq!(restored.phase(), CredentialV2Phase::PayloadSent);
+    assert_eq!(
+        restored.send(&payload),
+        Ok(CredentialV2Advance::ExactRetransmission)
+    );
+}
+
+#[test]
+fn test_065_checkpoint_bindings_expiry_generation_and_nonce_are_closed() {
+    let (mut allocator, mut claimant, _) = endpoints_at_payload();
+    let wrapping_key = [0xb1; 32];
+    assert!(matches!(
+        allocator.seal_checkpoint(
+            &wrapping_key,
+            1,
+            None,
+            CredentialV2CheckpointNonce::from_csprng([0xb2; 12]),
+            1_800_000_800,
+        ),
+        Err(CredentialV2Error::Schema)
+    ));
+    assert!(matches!(
+        claimant.seal_checkpoint(
+            &wrapping_key,
+            1,
+            Some(1_800_000_900),
+            CredentialV2CheckpointNonce::from_csprng([0xb2; 12]),
+            1_800_000_800,
+        ),
+        Err(CredentialV2Error::Schema)
+    ));
+
+    let checkpoint = allocator
+        .seal_checkpoint(
+            &wrapping_key,
+            1,
+            Some(1_800_000_900),
+            CredentialV2CheckpointNonce::from_csprng([0xb2; 12]),
+            1_800_000_800,
+        )
+        .unwrap();
+    let Value::Array(outer) = ciborium::de::from_reader(checkpoint.as_bytes()).unwrap() else {
+        panic!("checkpoint array")
+    };
+    assert_eq!(outer.len(), 9);
+    assert_eq!(outer[4].as_bytes().unwrap(), &CEREMONY);
+    assert!(outer[8].as_bytes().unwrap().len() <= 69_632);
+    assert!(matches!(
+        allocator.seal_checkpoint(
+            &wrapping_key,
+            2,
+            Some(1_800_000_900),
+            CredentialV2CheckpointNonce::from_csprng([0xb2; 12]),
+            1_800_000_800,
+        ),
+        Err(CredentialV2Error::Counter)
+    ));
+    assert!(CredentialV2Endpoint::restore_checkpoint(
+        checkpoint.as_bytes(),
+        &[0xff; 32],
+        Side::Allocator,
+        &carrier(),
+        1,
+        1_800_000_800,
+        Box::new(BodyVerifier::default()),
+    )
+    .is_err());
+    let mut mutated = checkpoint.as_bytes().to_vec();
+    *mutated.last_mut().unwrap() ^= 1;
+    assert!(CredentialV2Endpoint::restore_checkpoint(
+        &mutated,
+        &wrapping_key,
+        Side::Allocator,
+        &carrier(),
+        1,
+        1_800_000_800,
+        Box::new(BodyVerifier::default()),
+    )
+    .is_err());
+    assert!(CredentialV2Endpoint::restore_checkpoint(
+        checkpoint.as_bytes(),
+        &wrapping_key,
+        Side::Allocator,
+        &carrier(),
+        2,
+        1_800_000_800,
+        Box::new(BodyVerifier::default()),
+    )
+    .is_err());
+    assert_eq!(
+        CredentialV2Endpoint::restore_checkpoint(
+            checkpoint.as_bytes(),
+            &wrapping_key,
+            Side::Allocator,
+            &carrier(),
+            1,
+            1_800_000_900,
+            Box::new(BodyVerifier::default()),
+        )
+        .unwrap_err(),
+        CredentialV2Error::Expired
+    );
 }
 
 fn endpoints_at_payload() -> (
