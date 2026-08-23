@@ -96,10 +96,10 @@ fn intent(application: &str, action: &str, claims: (Vec<u8>, Vec<u8>)) -> Pairin
 #[test]
 fn test_010_profiles_are_endpoint_local_and_describe_their_carriers() {
     let (agent_verifier, _) = verifier(true);
-    let agent = AgentProfile::new(agent_verifier);
+    let mut agent = AgentProfile::new(agent_verifier);
     let (credential_verifier, _) = verifier(true);
-    let credential = CredentialProfile::new(credential_verifier);
-    let synthetic = SyntheticProfile::new(true);
+    let mut credential = CredentialProfile::new(credential_verifier);
+    let mut synthetic = SyntheticProfile::new(true);
 
     assert_eq!(agent.descriptor().application, AGENT_APPLICATION);
     assert_eq!(agent.descriptor().carrier.locator, LocatorKind::Nameplate);
@@ -295,7 +295,7 @@ fn credential_and_synthetic_payloads_bind_every_profile_field() {
         recipient: "new phone".into(),
     };
     let (credential_verifier, _) = verifier(true);
-    let credential = CredentialProfile::new(credential_verifier);
+    let mut credential = CredentialProfile::new(credential_verifier);
     let (_, credential_binding) = credential
         .recognise_intent(&intent(
             CREDENTIAL_APPLICATION,
@@ -325,7 +325,7 @@ fn credential_and_synthetic_payloads_bind_every_profile_field() {
         subject: "subject-1".into(),
         audience: "audience-2".into(),
     };
-    let synthetic = SyntheticProfile::new(true);
+    let mut synthetic = SyntheticProfile::new(true);
     let (_, synthetic_binding) = synthetic
         .recognise_intent(&intent(
             SYNTHETIC_APPLICATION,

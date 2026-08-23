@@ -6,6 +6,8 @@
 mod carrier;
 mod channel;
 mod context;
+mod display;
+mod endpoint;
 mod frame;
 mod object;
 
@@ -15,6 +17,16 @@ pub use carrier::{
 };
 pub use channel::{PendingCredentialV2Channel, SecureCredentialV2Channel};
 pub use context::CredentialV2Context;
+pub use display::{
+    credential_v2_intent_digest, recognise_credential_v2_intent, CredentialV2AccountProvenance,
+    CredentialV2DeviceBinding, CredentialV2Display, CredentialV2IntentAuthority,
+    CredentialV2IntentClaims, CredentialV2IntentInput, CredentialV2IntentVerifier,
+    CredentialV2OfferParser, CredentialV2TofuState, CredentialV2Transition, PathAToBDisplay,
+};
+pub use endpoint::{
+    CredentialV2Advance, CredentialV2BodyVerifier, CredentialV2Endpoint, CredentialV2LogicalBody,
+    CredentialV2Phase,
+};
 pub use frame::{decode_frame, encode_frame, CredentialV2Frame};
 pub use object::{
     decode_object, CredentialV2Kind, CredentialV2Object, CONTROL_PADDING_BYTES, LARGE_PADDING_BYTES,
@@ -54,6 +66,12 @@ pub enum CredentialV2Error {
     Size,
     /// A prior failure made the channel terminal.
     Terminal,
+    /// The application profile or authenticated authority comparison refused.
+    Profile,
+    /// A successor did not bind the exact prior object content hash.
+    Predecessor,
+    /// An object is invalid in the endpoint's current phase.
+    Phase,
 }
 
 impl fmt::Display for CredentialV2Error {
