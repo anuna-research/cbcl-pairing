@@ -397,3 +397,208 @@ const fn receive_direction(side: Side) -> Direction {
         Side::Claimant => Direction::AllocatorToClaimant,
     }
 }
+
+#[cfg(test)]
+mod independent_tests {
+    use super::*;
+    use crate::{
+        cpace,
+        credential_v2::{
+            encode_carrier, encode_frame, CredentialV2Carrier, CredentialV2CarrierInput,
+            CredentialV2Context, CredentialV2Frame, CredentialV2Presence,
+        },
+    };
+    use hmac::{Hmac, Mac};
+    use serde_json::{json, Value};
+    use sha2::{Digest, Sha256};
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+
+    fn oracle_bytes(output: &Value, key: &str) -> Vec<u8> {
+        hex::decode(output[key].as_str().expect("oracle hex string")).expect("oracle hex")
+    }
+
+    #[test]
+    fn test_066_python_oracle_reproduces_complete_v2_schedule_and_first_frame() {
+        let carrier = CredentialV2Carrier::new(CredentialV2CarrierInput {
+            application_context: "https://chat.anuna.io/selfsame/v2".into(),
+            relay_origin: "https://chat.anuna.io:9443".into(),
+            mailbox_id: [0x11; 32],
+            carrier_ceremony_id: [0x22; 32],
+            carrier_nonce: [0x33; 32],
+            claim_commitment: [0x44; 32],
+            relay_expires_at: 1_800_000_900,
+            expected_allocator_key: Some([0x77; 32]),
+        })
+        .unwrap();
+        let encoded_carrier = encode_carrier(&carrier).unwrap();
+        let profile_digest = [0x55; 32];
+        let context = CredentialV2Context::derive(&carrier, profile_digest).unwrap();
+        let expected_carrier_digest: [u8; 32] = Sha256::digest(encoded_carrier).into();
+        assert_eq!(carrier.digest(), expected_carrier_digest);
+        let allocator_presence = CredentialV2Presence::new([0x88; 16], [0x99; 16]);
+        let claimant_presence = CredentialV2Presence::new([0x88; 16], [0x99; 16]);
+        let allocator_scalar = [0x0a; 32];
+        let (allocator_state, allocator_message) = context
+            .start_cpace(Side::Allocator, &allocator_presence, allocator_scalar)
+            .unwrap();
+        let (claimant_state, claimant_message) = context
+            .start_cpace(Side::Claimant, &claimant_presence, [0x0b; 32])
+            .unwrap();
+        let allocator_frame = CredentialV2Frame::cpace(&allocator_message).unwrap();
+        let claimant_frame = CredentialV2Frame::cpace(&claimant_message).unwrap();
+        let allocator_frame_bytes = encode_frame(&allocator_frame).unwrap();
+        let claimant_frame_bytes = encode_frame(&claimant_frame).unwrap();
+        let plaintext = b"independent credential/v2 oracle";
+        let input = json!({
+            "allocator_scalar": hex::encode(allocator_scalar),
+            "sid": hex::encode(context.session_id()),
+            "allocator_share": hex::encode(allocator_message.share),
+            "allocator_ad": hex::encode(&allocator_message.associated_data),
+            "claimant_share": hex::encode(claimant_message.share),
+            "claimant_ad": hex::encode(&claimant_message.associated_data),
+            "public_context": hex::encode(context.public_context()),
+            "allocator_frame": hex::encode(&allocator_frame_bytes),
+            "claimant_frame": hex::encode(&claimant_frame_bytes),
+            "plaintext": hex::encode(plaintext),
+        });
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/credential_v2_oracle.py"
+        );
+        let mut child = Command::new("python3")
+            .arg(script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("python3 oracle starts");
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(serde_json::to_string(&input).unwrap().as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "oracle failed: {output:?}");
+        let oracle: Value = serde_json::from_slice(&output.stdout).unwrap();
+
+        let allocator_isk = cpace::finish(allocator_state, &claimant_message).unwrap();
+        let claimant_isk = cpace::finish(claimant_state, &allocator_message).unwrap();
+        assert_eq!(
+            allocator_isk.as_bytes().as_slice(),
+            oracle_bytes(&oracle, "isk")
+        );
+        assert_eq!(claimant_isk.as_bytes(), allocator_isk.as_bytes());
+        let mut extract = Hmac::<Sha512>::new_from_slice(&[]).unwrap();
+        extract.update(allocator_isk.as_bytes());
+        assert_eq!(
+            extract.finalize().into_bytes().as_slice(),
+            oracle_bytes(&oracle, "prk")
+        );
+        let hkdf = Hkdf::<Sha512>::new(Some(&[]), allocator_isk.as_bytes());
+        assert_eq!(
+            expand::<32>(
+                &hkdf,
+                b"pairing-credential-v2 kc A",
+                &oracle_bytes(&oracle, "th").try_into().unwrap()
+            )
+            .unwrap(),
+            oracle_bytes(&oracle, "kc_allocator").as_slice()
+        );
+        assert_eq!(
+            expand::<32>(
+                &hkdf,
+                b"pairing-credential-v2 kc B",
+                &oracle_bytes(&oracle, "th").try_into().unwrap()
+            )
+            .unwrap(),
+            oracle_bytes(&oracle, "kc_claimant").as_slice()
+        );
+
+        let pending_allocator = PendingCredentialV2Channel::new(
+            Side::Allocator,
+            allocator_isk,
+            context.public_context(),
+            &allocator_frame_bytes,
+            &claimant_frame_bytes,
+        )
+        .unwrap();
+        let pending_claimant = PendingCredentialV2Channel::new(
+            Side::Claimant,
+            claimant_isk,
+            context.public_context(),
+            &allocator_frame_bytes,
+            &claimant_frame_bytes,
+        )
+        .unwrap();
+        assert_eq!(
+            pending_allocator.transcript_hash.as_slice(),
+            oracle_bytes(&oracle, "th")
+        );
+        assert_eq!(
+            pending_allocator.local_finished.as_slice(),
+            oracle_bytes(&oracle, "finished_allocator")
+        );
+        assert_eq!(
+            pending_allocator.peer_finished.as_slice(),
+            oracle_bytes(&oracle, "finished_claimant")
+        );
+        assert_eq!(
+            pending_allocator
+                .secrets
+                .key_allocator_to_claimant
+                .as_slice(),
+            oracle_bytes(&oracle, "key_allocator_to_claimant")
+        );
+        assert_eq!(
+            pending_allocator
+                .secrets
+                .key_claimant_to_allocator
+                .as_slice(),
+            oracle_bytes(&oracle, "key_claimant_to_allocator")
+        );
+        assert_eq!(
+            pending_allocator
+                .secrets
+                .iv_allocator_to_claimant
+                .as_slice(),
+            oracle_bytes(&oracle, "iv_allocator_to_claimant")
+        );
+        assert_eq!(
+            pending_allocator
+                .secrets
+                .iv_claimant_to_allocator
+                .as_slice(),
+            oracle_bytes(&oracle, "iv_claimant_to_allocator")
+        );
+        assert_eq!(
+            pending_allocator.secrets.exporter.as_slice(),
+            oracle_bytes(&oracle, "exporter")
+        );
+
+        let finished_allocator = pending_allocator.local_finished_frame();
+        let finished_claimant = pending_claimant.local_finished_frame();
+        let mut allocator_channel = pending_allocator.confirm(&finished_claimant).unwrap();
+        let _claimant_channel = pending_claimant.confirm(&finished_allocator).unwrap();
+        let aad = sealed_aad(
+            Direction::AllocatorToClaimant,
+            0,
+            &allocator_channel.transcript_hash,
+        )
+        .unwrap();
+        assert_eq!(aad, oracle_bytes(&oracle, "aad_allocator_counter_zero"));
+        assert_eq!(
+            derive_nonce(*allocator_channel.send_iv, 0).as_slice(),
+            oracle_bytes(&oracle, "nonce_allocator_counter_zero")
+        );
+        let sealed = allocator_channel.seal(plaintext).unwrap();
+        let (_, counter, ciphertext) = sealed.sealed().unwrap();
+        assert_eq!(counter, 0);
+        assert_eq!(
+            ciphertext,
+            oracle_bytes(&oracle, "ciphertext_allocator_counter_zero")
+        );
+    }
+}
