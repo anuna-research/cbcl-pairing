@@ -4,7 +4,7 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.5-draft
+version: 0.5.6-draft
 last-updated: 2026-08-24
 owner-repo: cbcl-pairing
 implementation-status: credential-v1-local-complete; credential-v2-unimplemented
@@ -14,13 +14,13 @@ derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574ed
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
 authority-form: consolidated-current-protocol-and-consumer-pointer
-consumer-design: selfsame SPEC-008 0.5.6-draft
-coordinated-safety-design: selfsame SPEC-007 0.3.4-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.6-draft
+consumer-design: selfsame SPEC-008 0.5.7-draft
+coordinated-safety-design: selfsame SPEC-007 0.3.5-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.7-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> direct 0.5.0 reissue -> rejected coordinated reviews through 0.5.5 -> coordinated pointer closure"
+generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> direct 0.5.0 reissue -> rejected coordinated reviews through 0.5.6 -> v2 lifetime and receipt-name closure"
 ---
 
 # SPEC-001 — reusable blind pairing
@@ -107,7 +107,7 @@ authority after review.
 - Each membership queues at most 16 frames of at most 69,632 octets under
   [[SPEC-001-reusable-blind-pairing#NFR-002]] and
   [[SPEC-001-reusable-blind-pairing#NFR-004]].
-- Mailbox lifetime remains 60–600 seconds under
+- Credential/v1 mailbox lifetime remains 60–600 seconds under
   [[SPEC-001-reusable-blind-pairing#NFR-005]].
 - A maximum-size wire message completes recognition within 100 milliseconds
   under [[SPEC-001-reusable-blind-pairing#NFR-009]].
@@ -519,8 +519,10 @@ Trace:
 
 ### NFR-005: Mailbox lifetime is bounded
 
-Each mailbox lifetime SHALL be between 60 and 600 seconds. The default is 600
-seconds, and allocation returns the immutable absolute expiry.
+Each credential/v1 mailbox lifetime SHALL be between 60 and 600 seconds. Its
+default is 600 seconds. Credential/v2 follows
+[[SPEC-001-reusable-blind-pairing#NFR-023]]. Allocation returns the immutable
+absolute expiry for either version.
 
 Trace:
 - [[SPEC-001-reusable-blind-pairing#CON-002]]
@@ -1527,8 +1529,10 @@ scan unrelated mailboxes, bodies, expiries, memberships, or limiter entries.
 The relay retains at most one 32-octet commitment per waiting v2 mailbox. It
 never persists `T` and never exposes either secret through observability.
 
-The v2 mailbox lifetime remains between 60 and 600 seconds. The shared relay
-message ceiling remains 70,000 octets.
+The v2 mailbox lifetime SHALL be between 600 and 900 seconds. Its default is
+900 seconds. This range lets a consuming hub require 600 remaining seconds
+while permitting transport from relay allocation to hub allocation. The shared
+relay message ceiling remains 70,000 octets.
 
 Control logical bodies contain 1 through 2,048 octets. Large logical bodies
 contain 1 through 62,000 octets.
@@ -1562,7 +1566,7 @@ allocate-v2 = {
   "type": "allocate-v2",
   "mailbox-id": bstr .size 32,
   "claim-commitment": bstr .size 32,
-  ? "ttl-seconds": 60..600
+  ? "ttl-seconds": 600..900
 }
 
 claim-v2 = {
@@ -1585,6 +1589,9 @@ claimed-v2 = {
   "expires-at": uint
 }
 ```
+
+An omitted `ttl-seconds` in `allocate-v2` selects 900 seconds. Credential/v1
+keeps its 60-through-600 range and 600-second default unchanged.
 
 The committed schema contains one closed client union and one closed server
 union. Duplicate keys, extras, trailing bytes, and non-canonical encoding
@@ -1747,10 +1754,10 @@ The receipt logical body is this deterministic-CBOR map:
 
 ```cddl
 credential-v2-receipt-body = {
-  "carrier-ceremony-id": bstr .size 32,
+  "carrierCeremonyId": bstr .size 32,
   "predecessorDigest": bstr .size 32,
-  "final-status-jws": tstr .size (1..8192),
-  "final-status-digest": bstr .size 32
+  "finalStatusJws": tstr .size (1..8192),
+  "finalStatusDigest": bstr .size 32
 }
 ```
 
@@ -1817,10 +1824,10 @@ permissions, device binding, exact-pair TOFU state, transition, and signed
 offer-core digest.
 
 For the Selfsame profile, `CredentialV2IntentInput` is constructed only from
-the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.6-draft
+the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.7-draft
 CON-012's `signed-offer-v2` and its exact `OfferCoreV2`. The other ten body
 kinds cannot construct or amend an intent input. The consumer's nine successor
-body grammars are Selfsame SPEC-008 0.5.6-draft CON-987.
+body grammars are Selfsame SPEC-008 0.5.7-draft CON-987.
 
 The profile first parses one bounded peer `CredentialV2IntentInput`. Before any
 display allocation, it SHALL require byte equality between every overlapping
@@ -2098,6 +2105,11 @@ before response. Restart yields exactly pending or claimed state.
 Inspect snapshots, stores, heap retention, logs, metrics, traces, and errors.
 No claim bearer survives, and no commitment survives successful admission.
 
+For credential/v1, accept lifetimes 60 and 600 and refuse 59 and 601. Require
+the unchanged 600-second default. For credential/v2, accept 600 and 900 and
+refuse 599 and 901. Require the 900-second default and immutable returned
+expiry. Re-run version-1 wire vectors byte-identically.
+
 ### TEST-061: Credential/v2 cryptography and state are independently reproducible
 
 Two independent endpoints reproduce carrier, context, transcript, key schedule,
@@ -2155,9 +2167,9 @@ pointer, one current hub pointer, and one current test set.
 The current test set contains TEST-001 through TEST-029 and TEST-060 through
 TEST-067. No trajectory test supplies current authority.
 
-The current consumer is Selfsame SPEC-008 0.5.6-draft. The current safety
-authority is Selfsame SPEC-007 0.3.4-draft. The current hub design is cbcl-bus
-SPEC-053 0.17.6-draft.
+The current consumer is Selfsame SPEC-008 0.5.7-draft. The current safety
+authority is Selfsame SPEC-007 0.3.5-draft. The current hub design is cbcl-bus
+SPEC-053 0.17.7-draft.
 
 All four coordinated parents record the same generation metadata and review
 set.
@@ -2185,6 +2197,9 @@ arm, a body above 62,000 octets, or a changed status digest.
 Require the exact receipt map, carrier ceremony, predecessor, compact-JWS
 ASCII, and raw payload digest. Refuse every missing, extra, duplicated, or
 non-canonical member before a receipt effect.
+
+Require the exact member names `carrierCeremonyId`, `predecessorDigest`,
+`finalStatusJws`, and `finalStatusDigest`. Refuse every kebab-case substitute.
 
 Mutate each occurrence independently. Require refusal before display,
 decision, payload, status rebind, or identity effect.
@@ -2351,7 +2366,11 @@ required Tier-1 review.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.5.5-draft</summary>
+<summary>Revision history — 0.1.0 → 0.5.6-draft</summary>
+
+- 0.5.6-draft — gives credential/v2 a 900-second mailbox default and aligns
+  receipt member names with the consumer bodies. Credential/v1 lifetime and
+  bytes remain unchanged. No production action is authorized.
 
 - 0.5.5-draft — coordinates the corrected Selfsame and hub parent pointers.
   The credential/v2 protocol bytes and checkpoint rules remain unchanged. No
