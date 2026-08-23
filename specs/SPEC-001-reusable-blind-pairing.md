@@ -4,7 +4,7 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.4-draft
+version: 0.5.5-draft
 last-updated: 2026-08-24
 owner-repo: cbcl-pairing
 implementation-status: credential-v1-local-complete; credential-v2-unimplemented
@@ -14,13 +14,13 @@ derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574ed
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
 authority-form: consolidated-current-protocol-and-consumer-pointer
-consumer-design: selfsame SPEC-008 0.5.5-draft
-coordinated-safety-design: selfsame SPEC-007 0.3.3-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.5-draft
+consumer-design: selfsame SPEC-008 0.5.6-draft
+coordinated-safety-design: selfsame SPEC-007 0.3.4-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.6-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> direct 0.5.0 reissue -> rejected coordinated reviews through 0.5.4 -> explicit role-specific checkpoint expiry"
+generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> direct 0.5.0 reissue -> rejected coordinated reviews through 0.5.5 -> coordinated pointer closure"
 ---
 
 # SPEC-001 — reusable blind pairing
@@ -1817,10 +1817,10 @@ permissions, device binding, exact-pair TOFU state, transition, and signed
 offer-core digest.
 
 For the Selfsame profile, `CredentialV2IntentInput` is constructed only from
-the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.5-draft
+the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.6-draft
 CON-012's `signed-offer-v2` and its exact `OfferCoreV2`. The other ten body
 kinds cannot construct or amend an intent input. The consumer's nine successor
-body grammars are Selfsame SPEC-008 0.5.5-draft CON-987.
+body grammars are Selfsame SPEC-008 0.5.6-draft CON-987.
 
 The profile first parses one bounded peer `CredentialV2IntentInput`. Before any
 display allocation, it SHALL require byte equality between every overlapping
@@ -2155,9 +2155,9 @@ pointer, one current hub pointer, and one current test set.
 The current test set contains TEST-001 through TEST-029 and TEST-060 through
 TEST-067. No trajectory test supplies current authority.
 
-The current consumer is Selfsame SPEC-008 0.5.5-draft. The current safety
-authority is Selfsame SPEC-007 0.3.3-draft. The current hub design is cbcl-bus
-SPEC-053 0.17.5-draft.
+The current consumer is Selfsame SPEC-008 0.5.6-draft. The current safety
+authority is Selfsame SPEC-007 0.3.4-draft. The current hub design is cbcl-bus
+SPEC-053 0.17.6-draft.
 
 All four coordinated parents record the same generation metadata and review
 set.
@@ -2351,7 +2351,11 @@ required Tier-1 review.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.5.4-draft</summary>
+<summary>Revision history — 0.1.0 → 0.5.5-draft</summary>
+
+- 0.5.5-draft — coordinates the corrected Selfsame and hub parent pointers.
+  The credential/v2 protocol bytes and checkpoint rules remain unchanged. No
+  production action is authorized.
 
 - 0.5.4-draft — limits null checkpoint expiry to the claimant after durable
   payload send. The allocator keeps its numeric expiry and defers post-expiry
