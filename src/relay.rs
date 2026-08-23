@@ -8,7 +8,7 @@ use crate::{
     limiter::{LimitDecision, Limiter, LimiterConfig, LimiterError, Operation},
     mailbox::{
         transition, AllocationInput, Mailbox, MailboxCommand, MailboxEffect, MailboxError,
-        MailboxTransition, Membership, MembershipHash,
+        MailboxTransition, Membership, MembershipHash, V2AllocationInput,
     },
     observability::{
         CapacityCaps, RelayGauges, RelayLogEvent, RelayMetrics, RelayObservability, RelayOutcome,
@@ -241,6 +241,28 @@ impl RelayService {
                 ClientMessage::Claim(locator) => {
                     self.claim(connection, now, randomness.membership_token, &locator)?
                 }
+                ClientMessage::AllocateV2 {
+                    mailbox_id,
+                    claim_commitment,
+                    ttl_seconds,
+                } => self.allocate_v2(
+                    connection,
+                    now,
+                    randomness.membership_token,
+                    mailbox_id,
+                    claim_commitment,
+                    ttl_seconds,
+                )?,
+                ClientMessage::ClaimV2 {
+                    mailbox_id,
+                    claim_token,
+                } => self.claim_v2(
+                    connection,
+                    now,
+                    randomness.membership_token,
+                    mailbox_id,
+                    claim_token,
+                )?,
                 ClientMessage::Open {
                     mailbox_id,
                     membership_token,
@@ -471,6 +493,124 @@ impl RelayService {
         } else {
             Ok(vec![route(connection, ServerMessage::Error(503))])
         }
+    }
+
+    fn allocate_v2(
+        &mut self,
+        connection: ConnectionId,
+        now: u64,
+        membership_token: [u8; 32],
+        mailbox_id: [u8; 32],
+        claim_commitment: [u8; 32],
+        ttl_seconds: Option<u16>,
+    ) -> Result<Vec<RoutedMessage>, RelayError> {
+        if !self.config.allocation_enabled {
+            return Ok(vec![route(connection, ServerMessage::Error(503))]);
+        }
+        if self
+            .connections
+            .get(&connection)
+            .and_then(|state| state.membership)
+            .is_some()
+        {
+            return Ok(vec![route(connection, ServerMessage::Error(409))]);
+        }
+        let allocator_hash = token_hash(&membership_token);
+        if self.mailboxes.len() as u64 >= self.config.capacity.open_mailboxes
+            || self.mailboxes.contains_key(&mailbox_id)
+            || self.token_hash_exists(allocator_hash)
+        {
+            return Ok(vec![route(connection, ServerMessage::Error(503))]);
+        }
+        let mailbox = match Mailbox::allocate_v2(V2AllocationInput {
+            mailbox_id,
+            allocator_hash,
+            claim_commitment,
+            now,
+            ttl_seconds,
+        }) {
+            Ok(value) => value,
+            Err(error) => return Ok(vec![route(connection, mailbox_error(&error))]),
+        };
+        let expires_at = mailbox.expires_at();
+        self.store.put(&mailbox)?;
+        self.mailboxes.insert(mailbox_id, mailbox);
+        self.membership_hashes.insert(allocator_hash);
+        self.expiries.insert((expires_at, mailbox_id));
+        self.attach(
+            connection,
+            SessionMembership {
+                mailbox_id,
+                membership: Membership::Allocator,
+            },
+        );
+        Ok(vec![route(
+            connection,
+            ServerMessage::AllocatedV2 {
+                mailbox_id,
+                membership_token,
+                expires_at,
+            },
+        )])
+    }
+
+    fn claim_v2(
+        &mut self,
+        connection: ConnectionId,
+        now: u64,
+        membership_token: [u8; 32],
+        mailbox_id: [u8; 32],
+        claim_token: crate::wire::ClaimToken,
+    ) -> Result<Vec<RoutedMessage>, RelayError> {
+        if self
+            .connections
+            .get(&connection)
+            .and_then(|state| state.membership)
+            .is_some()
+        {
+            return Ok(vec![route(connection, ServerMessage::Error(409))]);
+        }
+        let claimant_hash = token_hash(&membership_token);
+        if self.token_hash_exists(claimant_hash) {
+            return Ok(vec![route(connection, ServerMessage::Error(409))]);
+        }
+        let Some(state) = self.mailboxes.get(&mailbox_id).cloned() else {
+            return Ok(vec![route(connection, ServerMessage::Error(404))]);
+        };
+        let transition = match transition(
+            &state,
+            now,
+            MailboxCommand::ClaimV2 {
+                claimant_hash,
+                claim_token,
+            },
+        ) {
+            Ok(value) => value,
+            Err(error) => return Ok(vec![route(connection, mailbox_error(&error))]),
+        };
+        let claimed = transition.effects.iter().find_map(|effect| match effect {
+            MailboxEffect::Claimed { expires_at, .. } => Some(*expires_at),
+            _ => None,
+        });
+        self.commit(mailbox_id, transition)?;
+        let Some(expires_at) = claimed else {
+            return Ok(vec![route(connection, ServerMessage::Error(503))]);
+        };
+        self.attach(
+            connection,
+            SessionMembership {
+                mailbox_id,
+                membership: Membership::Claimant,
+            },
+        );
+        Ok(vec![route(
+            connection,
+            ServerMessage::ClaimedV2 {
+                mailbox_id,
+                membership_token,
+                expires_at,
+            },
+        )])
     }
 
     fn open(
@@ -769,6 +909,8 @@ fn operation(message: &ClientMessage) -> Operation {
         ClientMessage::Bind => Operation::Bind,
         ClientMessage::Allocate { .. } => Operation::Allocate,
         ClientMessage::Claim(_) => Operation::Claim,
+        ClientMessage::AllocateV2 { .. } => Operation::Allocate,
+        ClientMessage::ClaimV2 { .. } => Operation::Claim,
         ClientMessage::Open { .. } => Operation::Open,
         ClientMessage::Put { .. } => Operation::Put,
         ClientMessage::Ack { .. } => Operation::Ack,

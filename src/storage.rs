@@ -6,8 +6,8 @@
 
 use crate::{
     mailbox::{
-        Mailbox, MailboxError, MailboxSnapshot, MailboxStatus, Membership, MembershipHash,
-        SequenceSnapshot,
+        AdmissionSnapshot, Mailbox, MailboxError, MailboxSnapshot, MailboxStatus, Membership,
+        MembershipHash, SequenceSnapshot,
     },
     wire::CloseReason,
 };
@@ -20,7 +20,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const STORE_DOMAIN: &str = "cbcl-pairing-mailbox-store/v1";
+const STORE_DOMAIN_V1: &str = "cbcl-pairing-mailbox-store/v1";
+const STORE_DOMAIN_V2: &str = "cbcl-pairing-mailbox-store/v2";
 
 /// Closed mailbox-store failure taxonomy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -222,8 +223,14 @@ fn encode(snapshot: &MailboxSnapshot) -> Result<Vec<u8>, StoreError> {
             ]))
         })
         .collect::<Result<Vec<_>, StoreError>>()?;
-    cbor2::to_canonical_vec(&Value::Array(vec![
-        Value::Text(STORE_DOMAIN.into()),
+    let mut record = vec![
+        Value::Text(
+            match &snapshot.admission {
+                AdmissionSnapshot::V1 => STORE_DOMAIN_V1,
+                _ => STORE_DOMAIN_V2,
+            }
+            .into(),
+        ),
         Value::Bytes(snapshot.mailbox_id.to_vec()),
         snapshot
             .nameplate
@@ -238,8 +245,11 @@ fn encode(snapshot: &MailboxSnapshot) -> Result<Vec<u8>, StoreError> {
                 .collect(),
         ),
         Value::Array(sequences),
-    ]))
-    .map_err(|_| StoreError::Malformed)
+    ];
+    if !matches!(&snapshot.admission, AdmissionSnapshot::V1) {
+        record.push(encode_admission(&snapshot.admission));
+    }
+    cbor2::to_canonical_vec(&Value::Array(record)).map_err(|_| StoreError::Malformed)
 }
 
 fn decode(input: &[u8]) -> Result<Mailbox, StoreError> {
@@ -251,13 +261,39 @@ fn decode(input: &[u8]) -> Result<Mailbox, StoreError> {
     let Value::Array(parts) = value else {
         return Err(StoreError::Malformed);
     };
-    let [domain, mailbox_id, nameplate, expires_at, status, hashes, sequences] = parts.as_slice()
-    else {
-        return Err(StoreError::Malformed);
-    };
-    if domain.as_text() != Some(STORE_DOMAIN) {
-        return Err(StoreError::Malformed);
-    }
+    let (domain, mailbox_id, nameplate, expires_at, status, hashes, sequences, admission) =
+        match parts.as_slice() {
+            [domain, mailbox_id, nameplate, expires_at, status, hashes, sequences]
+                if domain.as_text() == Some(STORE_DOMAIN_V1) =>
+            {
+                (
+                    domain,
+                    mailbox_id,
+                    nameplate,
+                    expires_at,
+                    status,
+                    hashes,
+                    sequences,
+                    AdmissionSnapshot::V1,
+                )
+            }
+            [domain, mailbox_id, nameplate, expires_at, status, hashes, sequences, admission]
+                if domain.as_text() == Some(STORE_DOMAIN_V2) =>
+            {
+                (
+                    domain,
+                    mailbox_id,
+                    nameplate,
+                    expires_at,
+                    status,
+                    hashes,
+                    sequences,
+                    decode_admission(admission)?,
+                )
+            }
+            _ => return Err(StoreError::Malformed),
+        };
+    let _ = domain;
     let mailbox_id = fixed::<32>(mailbox_id)?;
     let nameplate = match nameplate {
         Value::Null => None,
@@ -287,10 +323,38 @@ fn decode(input: &[u8]) -> Result<Mailbox, StoreError> {
         nameplate,
         expires_at: integer(expires_at)?,
         status,
+        admission,
         membership_hashes,
         sequences,
     })
     .map_err(|_| StoreError::Malformed)
+}
+
+fn encode_admission(admission: &AdmissionSnapshot) -> Value {
+    match admission {
+        AdmissionSnapshot::V1 => Value::Array(vec![Value::Integer(0.into())]),
+        AdmissionSnapshot::V2Pending(commitment) => Value::Array(vec![
+            Value::Integer(1.into()),
+            Value::Bytes(commitment.to_vec()),
+        ]),
+        AdmissionSnapshot::V2Claimed => Value::Array(vec![Value::Integer(2.into())]),
+        AdmissionSnapshot::V2Closed => Value::Array(vec![Value::Integer(3.into())]),
+    }
+}
+
+fn decode_admission(value: &Value) -> Result<AdmissionSnapshot, StoreError> {
+    let Value::Array(parts) = value else {
+        return Err(StoreError::Malformed);
+    };
+    match parts.as_slice() {
+        [kind] if integer(kind)? == 0 => Ok(AdmissionSnapshot::V1),
+        [kind, commitment] if integer(kind)? == 1 => {
+            Ok(AdmissionSnapshot::V2Pending(fixed::<32>(commitment)?))
+        }
+        [kind] if integer(kind)? == 2 => Ok(AdmissionSnapshot::V2Claimed),
+        [kind] if integer(kind)? == 3 => Ok(AdmissionSnapshot::V2Closed),
+        _ => Err(StoreError::Malformed),
+    }
 }
 
 fn decode_status(value: &Value) -> Result<MailboxStatus, StoreError> {

@@ -4,7 +4,9 @@ use std::{collections::BTreeSet, fmt, io::Cursor, sync::OnceLock};
 
 use cddl_cat::{cbor::validate_cbor, context::BasicContext, flatten::flatten_from_str};
 use ciborium::Value;
+use sha2::{Digest, Sha256};
 use url::Url;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const CDDL_SOURCE: &str = include_str!("../schemas/pairing-v1.cddl");
 
@@ -12,6 +14,42 @@ static CDDL_CONTEXT: OnceLock<Result<BasicContext, ()>> = OnceLock::new();
 
 /// Fixed suite identifier for version 1.
 pub const SUITE_ID: &str = "CPACE25519-SHA512-D21";
+
+/// A credential/v2 claimant mailbox bearer.
+///
+/// Debug output is redacted and the owned bytes are erased on drop.
+#[derive(Clone, Eq, PartialEq, Zeroize, ZeroizeOnDrop)]
+pub struct ClaimToken([u8; 16]);
+
+impl ClaimToken {
+    /// Take ownership of one fully recognised raw claim token.
+    #[must_use]
+    pub const fn new(bytes: [u8; 16]) -> Self {
+        Self(bytes)
+    }
+
+    /// Borrow the exact token octets for the protocol commitment.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
+    }
+}
+
+impl fmt::Debug for ClaimToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ClaimToken(REDACTED)")
+    }
+}
+
+/// Derive the credential/v2 mailbox claim commitment.
+#[must_use]
+pub fn claim_commitment(mailbox_id: [u8; 32], claim_token: &ClaimToken) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    digest.update(b"cbcl-pairing claim-v2 commitment\0");
+    digest.update(mailbox_id);
+    digest.update(claim_token.as_bytes());
+    digest.finalize().into()
+}
 
 /// A direct mailbox identifier or relay nameplate.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,6 +91,22 @@ pub enum ClientMessage {
     },
     /// Claim a mailbox locator.
     Claim(Locator),
+    /// Allocate one protected credential/v2 mailbox.
+    AllocateV2 {
+        /// Allocator-generated direct mailbox identifier.
+        mailbox_id: [u8; 32],
+        /// Commitment to the separate claimant presence token.
+        claim_commitment: [u8; 32],
+        /// Omitted or exact credential/v2 lifetime.
+        ttl_seconds: Option<u16>,
+    },
+    /// Claim one protected credential/v2 mailbox.
+    ClaimV2 {
+        /// Direct mailbox identifier from the machine carrier.
+        mailbox_id: [u8; 32],
+        /// Separate human-presence claim token.
+        claim_token: ClaimToken,
+    },
     /// Resume an existing membership.
     Open {
         /// Mailbox identifier.
@@ -114,6 +168,24 @@ pub enum ServerMessage {
         /// Claimant membership token.
         membership_token: [u8; 32],
         /// Absolute Unix expiry in seconds.
+        expires_at: u64,
+    },
+    /// Successful protected credential/v2 mailbox allocation.
+    AllocatedV2 {
+        /// Allocator-selected mailbox identifier.
+        mailbox_id: [u8; 32],
+        /// Allocator membership token.
+        membership_token: [u8; 32],
+        /// Immutable absolute Unix expiry in seconds.
+        expires_at: u64,
+    },
+    /// Successful protected credential/v2 mailbox claim.
+    ClaimedV2 {
+        /// Claimed mailbox identifier.
+        mailbox_id: [u8; 32],
+        /// Claimant membership token.
+        membership_token: [u8; 32],
+        /// Immutable absolute Unix expiry in seconds.
         expires_at: u64,
     },
     /// Opaque peer frame.
@@ -623,6 +695,19 @@ pub fn decode_client_message(input: &[u8]) -> Result<ClientMessage, RecognitionE
         "claim" => Ok(ClientMessage::Claim(locator_value(field(
             entries, "locator",
         )?)?)),
+        "allocate-v2" => Ok(ClientMessage::AllocateV2 {
+            mailbox_id: fixed_bytes(field(entries, "mailbox-id")?)?,
+            claim_commitment: fixed_bytes(field(entries, "claim-commitment")?)?,
+            ttl_seconds: optional_field(entries, "ttl-seconds")
+                .map(uint_value)
+                .transpose()?
+                .map(|value| value.try_into().map_err(|_| RecognitionError::TypedValue))
+                .transpose()?,
+        }),
+        "claim-v2" => Ok(ClientMessage::ClaimV2 {
+            mailbox_id: fixed_bytes(field(entries, "mailbox-id")?)?,
+            claim_token: ClaimToken::new(fixed_bytes(field(entries, "claim-token")?)?),
+        }),
         "open" => Ok(ClientMessage::Open {
             mailbox_id: fixed_bytes(field(entries, "mailbox-id")?)?,
             membership_token: fixed_bytes(field(entries, "membership-token")?)?,
@@ -674,6 +759,32 @@ pub fn encode_client_message(value: &ClientMessage) -> Result<Vec<u8>, Recogniti
             ("type", Value::Text("claim".into())),
             ("locator", encoded_locator(locator)),
         ]),
+        ClientMessage::AllocateV2 {
+            mailbox_id,
+            claim_commitment,
+            ttl_seconds,
+        } => {
+            let mut entries = vec![
+                ("type", Value::Text("allocate-v2".into())),
+                ("mailbox-id", Value::Bytes(mailbox_id.to_vec())),
+                ("claim-commitment", Value::Bytes(claim_commitment.to_vec())),
+            ];
+            if let Some(ttl_seconds) = ttl_seconds {
+                entries.push((
+                    "ttl-seconds",
+                    Value::Integer(u64::from(*ttl_seconds).into()),
+                ));
+            }
+            map(entries)
+        }
+        ClientMessage::ClaimV2 {
+            mailbox_id,
+            claim_token,
+        } => map(vec![
+            ("type", Value::Text("claim-v2".into())),
+            ("mailbox-id", Value::Bytes(mailbox_id.to_vec())),
+            ("claim-token", Value::Bytes(claim_token.as_bytes().to_vec())),
+        ]),
         ClientMessage::Open {
             mailbox_id,
             membership_token,
@@ -716,6 +827,16 @@ pub fn decode_server_message(input: &[u8]) -> Result<ServerMessage, RecognitionE
             expires_at: uint_value(field(entries, "expires-at")?)?,
         }),
         "claimed" => Ok(ServerMessage::Claimed {
+            mailbox_id: fixed_bytes(field(entries, "mailbox-id")?)?,
+            membership_token: fixed_bytes(field(entries, "membership-token")?)?,
+            expires_at: uint_value(field(entries, "expires-at")?)?,
+        }),
+        "allocated-v2" => Ok(ServerMessage::AllocatedV2 {
+            mailbox_id: fixed_bytes(field(entries, "mailbox-id")?)?,
+            membership_token: fixed_bytes(field(entries, "membership-token")?)?,
+            expires_at: uint_value(field(entries, "expires-at")?)?,
+        }),
+        "claimed-v2" => Ok(ServerMessage::ClaimedV2 {
             mailbox_id: fixed_bytes(field(entries, "mailbox-id")?)?,
             membership_token: fixed_bytes(field(entries, "membership-token")?)?,
             expires_at: uint_value(field(entries, "expires-at")?)?,
@@ -780,6 +901,26 @@ pub fn encode_server_message(value: &ServerMessage) -> Result<Vec<u8>, Recogniti
             expires_at,
         } => map(vec![
             ("type", Value::Text("claimed".into())),
+            ("mailbox-id", Value::Bytes(mailbox_id.to_vec())),
+            ("membership-token", Value::Bytes(membership_token.to_vec())),
+            ("expires-at", Value::Integer((*expires_at).into())),
+        ]),
+        ServerMessage::AllocatedV2 {
+            mailbox_id,
+            membership_token,
+            expires_at,
+        } => map(vec![
+            ("type", Value::Text("allocated-v2".into())),
+            ("mailbox-id", Value::Bytes(mailbox_id.to_vec())),
+            ("membership-token", Value::Bytes(membership_token.to_vec())),
+            ("expires-at", Value::Integer((*expires_at).into())),
+        ]),
+        ServerMessage::ClaimedV2 {
+            mailbox_id,
+            membership_token,
+            expires_at,
+        } => map(vec![
+            ("type", Value::Text("claimed-v2".into())),
             ("mailbox-id", Value::Bytes(mailbox_id.to_vec())),
             ("membership-token", Value::Bytes(membership_token.to_vec())),
             ("expires-at", Value::Integer((*expires_at).into())),
