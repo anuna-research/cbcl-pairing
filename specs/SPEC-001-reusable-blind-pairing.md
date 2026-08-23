@@ -4,7 +4,7 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.2-draft
+version: 0.5.3-draft
 last-updated: 2026-08-24
 owner-repo: cbcl-pairing
 implementation-status: credential-v1-local-complete; credential-v2-unimplemented
@@ -14,13 +14,13 @@ derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574ed
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
 authority-form: consolidated-current-protocol-and-consumer-pointer
-consumer-design: selfsame SPEC-008 0.5.3-draft
-coordinated-safety-design: selfsame SPEC-007 0.3.1-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.3-draft
+consumer-design: selfsame SPEC-008 0.5.4-draft
+coordinated-safety-design: selfsame SPEC-007 0.3.2-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.4-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> direct 0.5.0 reissue -> rejected 0.5.1 and 0.5.2 coordinated reviews -> complete cryptographic and object authority"
+generation-synthesis-trajectory: "credential/v2 protocol ancestry through 0.4.8 -> direct 0.5.0 reissue -> rejected coordinated reviews through 0.5.3 -> exact kind assignment and post-payload recovery closure"
 ---
 
 # SPEC-001 — reusable blind pairing
@@ -1720,9 +1720,24 @@ credential-v2-large-object = {
 }
 ```
 
-Kinds are `offer`, `intent-approve`, `intent-decline`, `preparation`,
-`comparison-confirmed`, `binding-confirmed`, `refusal`, `final-approve`,
-`final-decline`, `payload`, and `receipt`.
+Field 1 assigns exactly one integer to each kind:
+
+```text
+0  offer
+1  intent-approve
+2  intent-decline
+3  preparation
+4  comparison-confirmed
+5  binding-confirmed
+6  refusal
+7  final-approve
+8  final-decline
+9  payload
+10 receipt
+```
+
+No list order, enum declaration order, caller value, or version-1 assignment
+can replace this table.
 
 Only `offer`, `payload`, and `receipt` use the large arm. Every other kind uses
 the control arm. The receipt needs the large arm for the closed signed hub
@@ -1771,12 +1786,17 @@ intent-approve -> preparation
 preparation -> comparison-confirmed | binding-confirmed | refusal
 comparison-confirmed | binding-confirmed -> final-approve | final-decline
 final-approve -> payload
-payload -> receipt | refusal
+payload -> receipt
 intent-decline | final-decline | receipt | refusal -> terminal
 ```
 
 Allocator sends offer, comparison, binding, receipt, and allocator refusal.
 Claimant sends both decisions, preparation, payload, and claimant refusal.
+Either role can send refusal only before the claimant durably sends payload.
+After that send, application failure, hub unavailability, relay expiry, and an
+attempted refusal leave the claimant in `payload -> receipt`. No endpoint emits
+or accepts a post-payload refusal. The consumer resolves finality through an
+ordinary receipt or its independently authenticated status-recovery path.
 
 Each control binds sender, carrier ceremony, kind, intent digest, body digest,
 body length, and predecessor. Only exact retransmission is idempotent.
@@ -1797,10 +1817,10 @@ permissions, device binding, exact-pair TOFU state, transition, and signed
 offer-core digest.
 
 For the Selfsame profile, `CredentialV2IntentInput` is constructed only from
-the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.3-draft
+the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.4-draft
 CON-012's `signed-offer-v2` and its exact `OfferCoreV2`. The other ten body
 kinds cannot construct or amend an intent input. The consumer's nine successor
-body grammars are Selfsame SPEC-008 0.5.3-draft CON-987.
+body grammars are Selfsame SPEC-008 0.5.4-draft CON-987.
 
 The profile first parses one bounded peer `CredentialV2IntentInput`. Before any
 display allocation, it SHALL require byte equality between every overlapping
@@ -1873,7 +1893,7 @@ credential-v2-checkpoint = [
   2,
   "allocator" / "claimant",
   "anuna.io/credential/v2",
-  bstr .size 32,
+  bstr .size 32, ; carrierCeremonyId
   uint,
   null / uint,
   bstr .size 12,
@@ -1881,7 +1901,8 @@ credential-v2-checkpoint = [
 ]
 ```
 
-The integer is checkpoint generation. The following member is an absolute
+The fifth member is the raw carrier ceremony ID. The integer is checkpoint
+generation. The following member is an absolute
 expiry or `null`. `null` applies only after a claimant durably sends its
 payload and before receipt. The authenticated application status can outlive
 the relay mailbox. The nonce is fresh CSPRNG
@@ -1923,6 +1944,8 @@ erase the checkpoint. Relay or offer expiry after durable payload send does not
 erase the claimant checkpoint. It remains sealed and non-authorizing until a
 verified receipt, explicit application unlink, or root-lifecycle purge. The
 verified receipt can use the ordinary or recovered path.
+An attempted post-payload refusal is invalid input. It does not advance or erase
+the retained `payload -> receipt` checkpoint.
 The allocator wrapping key derives from its persisted installation seed. The
 claimant wrapping key derives inside unlocked custody with the application and
 carrier ceremony as context. Neither raw wrapping key enters the checkpoint.
@@ -2018,7 +2041,8 @@ or caller-selected algorithm supplies any value in this contract.
 ### CON-032: A profile may recover only an independently authenticated receipt
 
 The endpoint SHALL expose `recover_receipt` only while a recognised claimant
-checkpoint is in the `payload -> receipt` state. Its input is one exact
+checkpoint remains in the `payload -> receipt` state. No received refusal can
+move a post-payload claimant out of that state. Its input is one exact
 credential/v2 receipt logical body and one private
 `CredentialV2RecoveredReceiptAuthority`. The library produces that authority
 internally only after the registered consumer verifier returns success.
@@ -2114,8 +2138,10 @@ Accept control lengths 1, 23, 24, 255, 256, 2,047, and 2,048. Refuse 0, 2,049,
 Accept large lengths through 62,000 and refuse 62,001. Require exact encoded
 object lengths for every integer-head boundary.
 
-Require offer, payload, and receipt to use only the large arm. Require every
-other kind to use only the control arm. A receipt encoded as control refuses.
+Require kind integers 0 through 10 to map exactly to CON-028's table. Require
+offer 0, payload 9, and receipt 10 to use only the large arm. Require every
+other kind to use only the control arm. A receipt encoded as control, a
+permuted kind assignment, or an integer outside its arm refuses.
 
 Require one current credential/v2 protocol section, one current consumer
 pointer, one current hub pointer, and one current test set.
@@ -2123,9 +2149,9 @@ pointer, one current hub pointer, and one current test set.
 The current test set contains TEST-001 through TEST-029 and TEST-060 through
 TEST-067. No trajectory test supplies current authority.
 
-The current consumer is Selfsame SPEC-008 0.5.3-draft. The current safety
-authority is Selfsame SPEC-007 0.3.1-draft. The current hub design is cbcl-bus
-SPEC-053 0.17.3-draft.
+The current consumer is Selfsame SPEC-008 0.5.4-draft. The current safety
+authority is Selfsame SPEC-007 0.3.2-draft. The current hub design is cbcl-bus
+SPEC-053 0.17.4-draft.
 
 All four coordinated parents record the same generation metadata and review
 set.
@@ -2179,6 +2205,7 @@ cached retransmission, one monotonic state projection, and one terminal receipt.
 Mutate each outer member, ciphertext octet, wrapping key, role, application,
 ceremony, generation, expiry, counter, monitor state, predecessor, and cached
 frame. Require refusal before endpoint construction or a protocol effect.
+Require the fifth outer member to equal the raw carrier ceremony ID.
 
 Restore an old valid checkpoint against every advanced peer state. Require
 only exact idempotent replay or terminal refusal. Never repeat preliminary or
@@ -2202,6 +2229,7 @@ Two independent implementations consume only the current parent. They
 reproduce the thirteen-member public context, `TH`, and `PRK`. They reproduce
 all seven HKDF outputs, both Finished values, and every directional nonce. They
 also reproduce exact AAD bytes, sealed frames, content hashes, and predecessors.
+They assign the eleven object kinds exactly to integers 0 through 10.
 
 Exercise counters zero, one, 255, 256, the largest unsigned 64-bit value, and
 exhaustion. Mutate one public-context position, nullable key, role, label byte,
@@ -2222,6 +2250,10 @@ At every state other than claimant `payload -> receipt`, call
 no state change. At the correct state, require the byte-identical ordinary and
 recovered receipt paths to reach the same terminal state and erase the same
 checkpoint.
+
+After durable payload send, deliver every validly framed refusal reason. Require
+the refusal itself to fail recognition, the claimant checkpoint to remain in
+`payload -> receipt`, and a later exact recovered receipt to complete normally.
 
 Attempt to construct, clone, serialize, replay, or substitute
 `CredentialV2RecoveredReceiptAuthority`. Compile-time or recognition failure
@@ -2306,7 +2338,12 @@ required Tier-1 review.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.5.2-draft</summary>
+<summary>Revision history — 0.1.0 → 0.5.3-draft</summary>
+
+- 0.5.3-draft — assigns every credential/v2 object kind its exact integer. It
+  names the checkpoint ceremony member and prohibits post-payload refusal.
+  Authenticated receipt recovery retains one reachable reducer state. No
+  production action is authorized.
 
 - 0.5.2-draft — states the complete credential/v2 public context, key
   schedule, Finished, nonce, AAD, content-hash, and authenticated receipt
