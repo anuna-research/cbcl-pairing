@@ -21,17 +21,21 @@ The sealed reducer checkpoint uses the exact role-specific deterministic-CBOR
 HKDF info, ceremony salt, AES-256-GCM outer shape and seven-member AAD. It binds
 role, profile, raw carrier ceremony, positive generation, expiry, nonce,
 carrier, phase, intent, predecessor object, cached retransmission, transcript,
-traffic keys, IVs, exporter, and both exact next counters. It refuses wrong
+traffic keys, IVs, exporter, relay membership bearer and monitor projection,
+exact cached sealed frame, and both exact next counters. It refuses wrong
 keys, tampering, changed generation, expiry-shape violations, channel-role
 substitution, terminal channel state, and nonce reuse. A claimant payload
-checkpoint uses null expiry, restores after relay expiry, and resumes an
-interoperable next encrypted frame at the retained counter.
+checkpoint uses null expiry, restores after relay expiry, and returns the
+byte-identical cached payload ciphertext without consuming another counter.
+The checkpoint omits duplicate outbound plaintext bytes once their typed
+metadata, authenticated content hash, and sealed frame are retained, so the
+maximum payload remains inside the fixed checkpoint bound.
 
-This is deliberately not the final CON-030 evidence. The current reducer type
-does not own pre-Finished admission secrets or relay membership, so those
-values are not yet inside this checkpoint. The complete pre-Finished session
-composition and crash matrix remain open before the
-`pairing-v2-channel` task can be completed.
+The separate allocator bootstrap checkpoint now covers carrier allocation,
+claim admission, CPace share, and Finished state, including the membership
+bearer and exact cached pre-Finished frame. Its Red and Green Gate records are
+`credential-v2-bootstrap-checkpoint-red-2026-08-24.md` and
+`credential-v2-bootstrap-checkpoint-green-2026-08-24.md`.
 
 The hard-coded allocator vector was independently calculated with Python's
 standard `hmac`/`hashlib` implementation from the exact deterministic-CBOR info:

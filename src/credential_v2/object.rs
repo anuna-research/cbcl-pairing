@@ -76,7 +76,7 @@ impl CredentialV2Kind {
         matches!(self, Self::Offer | Self::Payload | Self::Receipt)
     }
 
-    fn from_number(value: u64) -> Result<Self, CredentialV2Error> {
+    pub(super) fn from_number(value: u64) -> Result<Self, CredentialV2Error> {
         Self::ALL
             .get(usize::try_from(value).map_err(|_| CredentialV2Error::Schema)?)
             .copied()

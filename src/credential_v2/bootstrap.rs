@@ -28,10 +28,11 @@ pub enum CredentialV2AllocatorBootstrapPhase {
 
 /// Relay membership and monitor projection retained across allocator crashes.
 pub struct CredentialV2RelayState {
-    membership_token: Zeroizing<[u8; 32]>,
-    next_local_sequence: u8,
-    next_peer_sequence: u8,
-    awaiting_ack: bool,
+    pub(super) membership_token: Zeroizing<[u8; 32]>,
+    pub(super) next_local_sequence: u8,
+    pub(super) next_peer_sequence: u8,
+    pub(super) awaiting_ack: bool,
+    pub(super) cached_outbound: Option<CredentialV2Frame>,
 }
 
 impl CredentialV2RelayState {
@@ -43,6 +44,7 @@ impl CredentialV2RelayState {
             next_local_sequence: 0,
             next_peer_sequence: 0,
             awaiting_ack: false,
+            cached_outbound: None,
         }
     }
 
@@ -50,6 +52,24 @@ impl CredentialV2RelayState {
     #[must_use]
     pub fn membership_token(&self) -> &[u8; 32] {
         &self.membership_token
+    }
+
+    /// Borrow the exact sealed application frame awaiting relay acknowledgement.
+    #[must_use]
+    pub const fn cached_outbound_frame(&self) -> Option<&CredentialV2Frame> {
+        self.cached_outbound.as_ref()
+    }
+
+    pub(super) fn cache_application_frame(
+        &mut self,
+        frame: CredentialV2Frame,
+    ) -> Result<(), CredentialV2Error> {
+        if self.awaiting_ack || !matches!(frame, CredentialV2Frame::Sealed { .. }) {
+            return Err(CredentialV2Error::Phase);
+        }
+        self.cached_outbound = Some(frame);
+        self.awaiting_ack = true;
+        Ok(())
     }
 }
 
@@ -61,6 +81,7 @@ impl fmt::Debug for CredentialV2RelayState {
             .field("next_local_sequence", &self.next_local_sequence)
             .field("next_peer_sequence", &self.next_peer_sequence)
             .field("awaiting_ack", &self.awaiting_ack)
+            .field("cached_outbound", &self.cached_outbound.is_some())
             .finish()
     }
 }
@@ -333,6 +354,7 @@ impl CredentialV2AllocatorBootstrap {
             next_local_sequence: cursor.byte()?,
             next_peer_sequence: cursor.byte()?,
             awaiting_ack: cursor.boolean()?,
+            cached_outbound: None,
         };
         let fresh_scalar = cursor.optional_array()?.map(Zeroizing::new);
         let peer_cpace = cursor.optional_frame()?;

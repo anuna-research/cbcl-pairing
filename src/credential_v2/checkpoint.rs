@@ -2,7 +2,7 @@ use super::channel::SecureCredentialV2ChannelSnapshot;
 use super::{
     decode_canonical, decode_object, encode_carrier, fixed_bytes, CredentialV2BodyVerifier,
     CredentialV2Carrier, CredentialV2Endpoint, CredentialV2Error, CredentialV2Kind,
-    CredentialV2Phase, SecureCredentialV2Channel,
+    CredentialV2Phase, CredentialV2RelayState, SecureCredentialV2Channel,
 };
 use crate::wire::Side;
 use aes_gcm::{
@@ -52,13 +52,20 @@ pub struct EndpointCheckpointV2 {
 pub struct RestoredCredentialV2Endpoint {
     endpoint: CredentialV2Endpoint,
     channel: SecureCredentialV2Channel,
+    relay: CredentialV2RelayState,
 }
 
 impl RestoredCredentialV2Endpoint {
     /// Consume the restored aggregate into the two live protocol components.
     #[must_use]
-    pub fn into_parts(self) -> (CredentialV2Endpoint, SecureCredentialV2Channel) {
-        (self.endpoint, self.channel)
+    pub fn into_parts(
+        self,
+    ) -> (
+        CredentialV2Endpoint,
+        SecureCredentialV2Channel,
+        CredentialV2RelayState,
+    ) {
+        (self.endpoint, self.channel, self.relay)
     }
 }
 
@@ -171,9 +178,11 @@ pub(super) fn open_checkpoint_plaintext(
 
 impl CredentialV2Endpoint {
     /// Seal the reducer's current authority before an outbound effect.
+    #[allow(clippy::too_many_arguments)]
     pub fn seal_checkpoint(
         &mut self,
         channel: &SecureCredentialV2Channel,
+        relay: &CredentialV2RelayState,
         wrapping_key: &[u8; 32],
         generation: u64,
         expiry: Option<u64>,
@@ -197,7 +206,7 @@ impl CredentialV2Endpoint {
             return Err(CredentialV2Error::Counter);
         }
 
-        let plaintext = encode_inner(self, channel, generation, nonce.0)?;
+        let plaintext = encode_inner(self, channel, relay, generation, nonce.0)?;
         let checkpoint = seal_checkpoint_plaintext(
             plaintext.as_slice(),
             self.side,
@@ -231,7 +240,7 @@ impl CredentialV2Endpoint {
             expected_generation,
             now,
         )?;
-        let (endpoint, channel) = decode_inner(
+        let (endpoint, channel, relay) = decode_inner(
             opened.plaintext.as_slice(),
             expected_side,
             expected_carrier,
@@ -246,7 +255,11 @@ impl CredentialV2Endpoint {
             endpoint.carrier.relay_expires_at(),
             now,
         )?;
-        Ok(RestoredCredentialV2Endpoint { endpoint, channel })
+        Ok(RestoredCredentialV2Endpoint {
+            endpoint,
+            channel,
+            relay,
+        })
     }
 }
 
@@ -364,6 +377,7 @@ fn checkpoint_key_info(side: Side) -> Result<Vec<u8>, CredentialV2Error> {
 fn encode_inner(
     endpoint: &CredentialV2Endpoint,
     channel: &SecureCredentialV2Channel,
+    relay: &CredentialV2RelayState,
     generation: u64,
     nonce: [u8; 12],
 ) -> Result<Zeroizing<Vec<u8>>, CredentialV2Error> {
@@ -371,7 +385,11 @@ fn encode_inner(
     let mut output = Zeroizing::new(Vec::with_capacity(
         INNER_DOMAIN.len()
             + carrier.len()
-            + endpoint.last.as_ref().map_or(0, |last| last.bytes.len())
+            + endpoint
+                .last
+                .as_ref()
+                .and_then(|last| last.bytes.as_ref())
+                .map_or(0, Vec::len)
             + 128,
     ));
     output.extend_from_slice(INNER_DOMAIN);
@@ -389,13 +407,25 @@ fn encode_inner(
         Some(last) => {
             output.push(1);
             output.push(side_number(last.sender));
-            append_bytes(&mut output, &last.bytes)?;
+            output.push(last.kind.number());
+            output.extend_from_slice(&last.intent_digest);
+            output.extend_from_slice(&last.content_hash);
+            let omit_outbound_bytes =
+                last.sender == endpoint.side && relay.cached_outbound.is_some();
+            match last.bytes.as_ref().filter(|_| !omit_outbound_bytes) {
+                Some(bytes) => {
+                    output.push(1);
+                    append_bytes(&mut output, bytes)?;
+                }
+                None => output.push(0),
+            }
         }
         None => output.push(0),
     }
     output.extend_from_slice(&generation.to_be_bytes());
     output.extend_from_slice(&nonce);
     append_channel(&mut output, &channel.checkpoint_snapshot());
+    append_relay(&mut output, relay)?;
     Ok(output)
 }
 
@@ -406,7 +436,14 @@ fn decode_inner(
     expected_generation: u64,
     expected_nonce: [u8; 12],
     body_verifier: Box<dyn CredentialV2BodyVerifier>,
-) -> Result<(CredentialV2Endpoint, SecureCredentialV2Channel), CredentialV2Error> {
+) -> Result<
+    (
+        CredentialV2Endpoint,
+        SecureCredentialV2Channel,
+        CredentialV2RelayState,
+    ),
+    CredentialV2Error,
+> {
     let mut cursor = ByteCursor::new(input);
     if cursor.take(INNER_DOMAIN.len())? != INNER_DOMAIN {
         return Err(CredentialV2Error::Schema);
@@ -427,12 +464,29 @@ fn decode_inner(
         0 => None,
         1 => {
             let sender = number_side(cursor.byte()?)?;
-            let bytes = cursor.length_prefixed(MAX_CIPHERTEXT)?.to_vec();
-            let object = decode_object(&bytes)?;
+            let kind = CredentialV2Kind::from_number(u64::from(cursor.byte()?))?;
+            let intent_digest = cursor.array()?;
+            let content_hash = cursor.array()?;
+            let bytes = match cursor.byte()? {
+                0 => None,
+                1 => Some(cursor.length_prefixed(MAX_CIPHERTEXT)?.to_vec()),
+                _ => return Err(CredentialV2Error::Schema),
+            };
+            if let Some(bytes) = bytes.as_ref() {
+                let object = decode_object(bytes)?;
+                if object.kind() != kind
+                    || object.intent_digest() != &intent_digest
+                    || object.content_hash() != content_hash
+                {
+                    return Err(CredentialV2Error::Schema);
+                }
+            }
             Some(super::endpoint::LastObject {
                 sender,
                 bytes,
-                content_hash: object.content_hash(),
+                kind,
+                intent_digest,
+                content_hash,
             })
         }
         _ => return Err(CredentialV2Error::Schema),
@@ -440,11 +494,15 @@ fn decode_inner(
     let generation = cursor.u64()?;
     let nonce = cursor.array()?;
     let channel = decode_channel(&mut cursor)?;
+    let relay = decode_relay(&mut cursor)?;
     if !cursor.finished()
         || generation != expected_generation
         || nonce != expected_nonce
         || channel.local_side != side
         || channel.terminal
+        || last.as_ref().is_some_and(|last| {
+            last.bytes.is_none() && !(last.sender == side && relay.cached_outbound.is_some())
+        })
         || !consistent_projection(phase, intent_digest, last.as_ref())
     {
         return Err(CredentialV2Error::Schema);
@@ -462,7 +520,58 @@ fn decode_inner(
     Ok((
         endpoint,
         SecureCredentialV2Channel::restore_snapshot(channel),
+        relay,
     ))
+}
+
+fn append_relay(
+    output: &mut Vec<u8>,
+    relay: &CredentialV2RelayState,
+) -> Result<(), CredentialV2Error> {
+    output.extend_from_slice(relay.membership_token.as_slice());
+    output.push(relay.next_local_sequence);
+    output.push(relay.next_peer_sequence);
+    output.push(u8::from(relay.awaiting_ack));
+    match relay.cached_outbound.as_ref() {
+        Some(frame) => {
+            output.push(1);
+            append_bytes(output, &super::encode_frame(frame)?)?;
+        }
+        None => output.push(0),
+    }
+    Ok(())
+}
+
+fn decode_relay(cursor: &mut ByteCursor<'_>) -> Result<CredentialV2RelayState, CredentialV2Error> {
+    let membership_token = Zeroizing::new(cursor.array()?);
+    let next_local_sequence = cursor.byte()?;
+    let next_peer_sequence = cursor.byte()?;
+    let awaiting_ack = match cursor.byte()? {
+        0 => false,
+        1 => true,
+        _ => return Err(CredentialV2Error::Schema),
+    };
+    let cached_outbound = match cursor.byte()? {
+        0 => None,
+        1 => Some(super::decode_frame(
+            cursor.length_prefixed(MAX_CIPHERTEXT)?,
+        )?),
+        _ => return Err(CredentialV2Error::Schema),
+    };
+    if awaiting_ack != cached_outbound.is_some()
+        || cached_outbound
+            .as_ref()
+            .is_some_and(|frame| !matches!(frame, super::CredentialV2Frame::Sealed { .. }))
+    {
+        return Err(CredentialV2Error::Schema);
+    }
+    Ok(CredentialV2RelayState {
+        membership_token,
+        next_local_sequence,
+        next_peer_sequence,
+        awaiting_ack,
+        cached_outbound,
+    })
 }
 
 fn append_channel(output: &mut Vec<u8>, channel: &SecureCredentialV2ChannelSnapshot) {
@@ -555,8 +664,7 @@ fn consistent_projection(
 }
 
 fn last_kind(last: &super::endpoint::LastObject) -> Option<(CredentialV2Kind, [u8; 32])> {
-    let object = decode_object(&last.bytes).ok()?;
-    Some((object.kind(), *object.intent_digest()))
+    Some((last.kind, last.intent_digest))
 }
 
 fn validate_checkpoint_phase(

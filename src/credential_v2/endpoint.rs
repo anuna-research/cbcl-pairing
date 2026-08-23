@@ -1,7 +1,8 @@
 use super::{
     decode_canonical, field, fixed_bytes, map_entries, recognise_credential_v2_intent,
-    CredentialV2Carrier, CredentialV2Display, CredentialV2Error, CredentialV2IntentAuthority,
-    CredentialV2IntentVerifier, CredentialV2Kind, CredentialV2Object, CredentialV2OfferParser,
+    CredentialV2Carrier, CredentialV2Display, CredentialV2Error, CredentialV2Frame,
+    CredentialV2IntentAuthority, CredentialV2IntentVerifier, CredentialV2Kind, CredentialV2Object,
+    CredentialV2OfferParser, CredentialV2RelayState, SecureCredentialV2Channel,
 };
 use crate::wire::Side;
 use sha2::{Digest, Sha256};
@@ -105,7 +106,9 @@ pub struct CredentialV2RecoveredReceiptAuthority {
 #[derive(Debug)]
 pub(super) struct LastObject {
     pub(super) sender: Side,
-    pub(super) bytes: Vec<u8>,
+    pub(super) bytes: Option<Vec<u8>>,
+    pub(super) kind: CredentialV2Kind,
+    pub(super) intent_digest: [u8; 32],
     pub(super) content_hash: [u8; 32],
 }
 
@@ -146,6 +149,31 @@ impl CredentialV2Endpoint {
     #[must_use]
     pub const fn phase(&self) -> CredentialV2Phase {
         self.phase
+    }
+
+    /// Advance and cache one sealed outbound frame before any network effect.
+    pub fn prepare_outbound(
+        &mut self,
+        object: &CredentialV2Object,
+        channel: &mut SecureCredentialV2Channel,
+        relay: &mut CredentialV2RelayState,
+    ) -> Result<CredentialV2Frame, CredentialV2Error> {
+        if channel.local_side() != self.side {
+            return Err(CredentialV2Error::Direction);
+        }
+        if let Some(cached) = relay.cached_outbound_frame().cloned() {
+            return match self.send(object)? {
+                CredentialV2Advance::ExactRetransmission => Ok(cached),
+                _ => Err(CredentialV2Error::Phase),
+            };
+        }
+        channel.can_seal(object.as_bytes())?;
+        if self.send(object)? != CredentialV2Advance::Advanced {
+            return Err(CredentialV2Error::Phase);
+        }
+        let frame = channel.seal(object.as_bytes())?;
+        relay.cache_application_frame(frame.clone())?;
+        Ok(frame)
     }
 
     /// Apply one locally generated object under this endpoint's sender role.
@@ -342,7 +370,15 @@ impl CredentialV2Endpoint {
         sender: Side,
     ) -> Option<Result<CredentialV2Advance, CredentialV2Error>> {
         self.last.as_ref().and_then(|last| {
-            if last.sender == sender && last.bytes == object.as_bytes() {
+            if last.sender == sender
+                && last.kind == object.kind()
+                && last.intent_digest == *object.intent_digest()
+                && last.content_hash == object.content_hash()
+                && last
+                    .bytes
+                    .as_ref()
+                    .is_none_or(|bytes| bytes == object.as_bytes())
+            {
                 Some(Ok(CredentialV2Advance::ExactRetransmission))
             } else {
                 None
@@ -356,7 +392,9 @@ impl CredentialV2Endpoint {
         }
         self.last = Some(LastObject {
             sender,
-            bytes: object.as_bytes().to_vec(),
+            bytes: Some(object.as_bytes().to_vec()),
+            kind: object.kind(),
+            intent_digest: *object.intent_digest(),
             content_hash: object.content_hash(),
         });
         self.phase = next;

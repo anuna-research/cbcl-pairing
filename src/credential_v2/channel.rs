@@ -196,6 +196,17 @@ impl fmt::Debug for SecureCredentialV2Channel {
 }
 
 impl SecureCredentialV2Channel {
+    pub(super) fn can_seal(&self, plaintext: &[u8]) -> Result<(), CredentialV2Error> {
+        if self.terminal {
+            return Err(CredentialV2Error::Terminal);
+        }
+        if plaintext.is_empty() || plaintext.len() > MAX_PLAINTEXT {
+            return Err(CredentialV2Error::Size);
+        }
+        self.next_send_counter.ok_or(CredentialV2Error::Counter)?;
+        Ok(())
+    }
+
     pub(super) fn checkpoint_snapshot(&self) -> SecureCredentialV2ChannelSnapshot {
         SecureCredentialV2ChannelSnapshot {
             local_side: self.local_side,
@@ -232,12 +243,7 @@ impl SecureCredentialV2Channel {
 
     /// Seal one plaintext with the exact next local-direction counter.
     pub fn seal(&mut self, plaintext: &[u8]) -> Result<CredentialV2Frame, CredentialV2Error> {
-        if self.terminal {
-            return Err(CredentialV2Error::Terminal);
-        }
-        if plaintext.is_empty() || plaintext.len() > MAX_PLAINTEXT {
-            return Err(CredentialV2Error::Size);
-        }
+        self.can_seal(plaintext)?;
         let counter = self.next_send_counter.ok_or(CredentialV2Error::Counter)?;
         let direction = send_direction(self.local_side);
         let aad = sealed_aad(direction, counter, &self.transcript_hash)?;
