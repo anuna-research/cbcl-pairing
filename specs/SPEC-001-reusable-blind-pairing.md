@@ -4,15 +4,22 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.2.0
-last-updated: 2026-08-16
+version: 0.4.0-draft
+last-updated: 2026-08-23
 owner-repo: cbcl-pairing
 implementation-status: local-complete
-implementation-baseline: b2a9df8166bf92be8e2207f84830e03c9db9f750
+implementation-baseline: c22f2d0526432c01c56d64be35a8d4f87516ec92
 documentation-baseline: b2a9df8166bf92be8e2207f84830e03c9db9f750
 derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574edc8
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
+authority-form: consolidated-current-consumer-pointer; credential-v2 protocol ancestry through 0.4.8 is preserved; 0.4.9 through 0.4.12 pointer instruments are historical only
+consumer-design: selfsame SPEC-008 0.5.0-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.0-draft
+generation-model-family: OpenAI GPT-5
+generation-model-version: gpt-5.6-sol
+generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
+generation-synthesis-trajectory: "unchanged credential/v2 body through 0.4.8 -> pointer reviews through 0.4.12 -> N11 stopping rule -> consolidated parent pointer"
 ---
 
 # SPEC-001 — reusable blind pairing
@@ -1453,6 +1460,33 @@ Lattice ABE remains an application-authorization overlay, not a pairing suite.
 Selection requires complete encodings, size measurements, independent vectors,
 interoperability, downgrade analysis, and human cryptography review.
 
+## Credential/v2 consumer coordination
+
+This parent is the sole current cbcl-pairing consumer pointer for the
+credential/v2 increment. Trajectory pointer amendments and review dispositions
+provide evidence and no normative precedence.
+
+The protocol body remains the unchanged credential/v2 body recorded through
+the reviewed 0.4.8 increment. This reissue changes no wire byte, carrier,
+presence-code input, CPace context, sender rule, state rule, display-verifier
+boundary, envelope, cap, or test vector.
+
+The exact current protocol test set contains TEST-030 through TEST-049. It also
+contains TEST-050 except its retired positive control witness. That witness
+remains a negative obligation: 4,096 octets refuses. TEST-051 through TEST-056
+and TEST-059 survive. TEST-057 and TEST-058 do not survive.
+
+The current consumer design is Selfsame SPEC-008 CON-985 at parent version
+0.5.0-draft. The coordinated hub design is cbcl-bus SPEC-053 REQ-081 at parent
+version 0.17.0-draft.
+
+The three parent specifications record the same generation family, version,
+and session. A qualifying review SHALL use another model family and a fresh
+session, record its authentication path, and review the three parents together.
+
+A fresh Tier-1 PASS authorizes only the Elephant SPL and test-first plan. It
+authorizes no production allocation, release, or deployment.
+
 ## Production gates
 
 Production allocation remains prohibited until all applicable gates have
@@ -1530,7 +1564,11 @@ required Tier-1 review.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.2.0</summary>
+<summary>Revision history — 0.1.0 → 0.4.0-draft</summary>
+
+- 0.4.0-draft — preserves the unchanged credential/v2 protocol body through
+  0.4.8 and moves the current consumer pointer into this parent. The
+  coordinated Tier-1 review remains open. No code or deployment is authorized.
 
 - 0.2.0 — added work-amplification failure analysis, performance limits,
   indexed relay accounting, clock clamping, limiter diversity handling, and
