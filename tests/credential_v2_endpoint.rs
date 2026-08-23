@@ -3,11 +3,11 @@
 use cbcl_pairing::{
     credential_v2::{
         credential_v2_intent_digest, CredentialV2AccountProvenance, CredentialV2Advance,
-        CredentialV2BodyVerifier, CredentialV2DeviceBinding, CredentialV2Endpoint,
-        CredentialV2Error, CredentialV2IntentAuthority, CredentialV2IntentClaims,
-        CredentialV2IntentInput, CredentialV2IntentVerifier, CredentialV2Kind,
-        CredentialV2LogicalBody, CredentialV2Object, CredentialV2OfferParser, CredentialV2Phase,
-        CredentialV2TofuState, CredentialV2Transition,
+        CredentialV2BodyVerifier, CredentialV2Carrier, CredentialV2CarrierInput,
+        CredentialV2DeviceBinding, CredentialV2Endpoint, CredentialV2Error,
+        CredentialV2IntentAuthority, CredentialV2IntentClaims, CredentialV2IntentInput,
+        CredentialV2IntentVerifier, CredentialV2Kind, CredentialV2LogicalBody, CredentialV2Object,
+        CredentialV2OfferParser, CredentialV2Phase, CredentialV2TofuState, CredentialV2Transition,
     },
     wire::Side,
 };
@@ -89,6 +89,20 @@ fn authority() -> CredentialV2IntentAuthority {
     CredentialV2IntentAuthority::new(claims(), CredentialV2TofuState::NewPair).unwrap()
 }
 
+fn carrier() -> CredentialV2Carrier {
+    CredentialV2Carrier::new(CredentialV2CarrierInput {
+        application_context: "https://chat.anuna.io/selfsame/v2".into(),
+        relay_origin: "https://chat.anuna.io:9443".into(),
+        mailbox_id: [0x41; 32],
+        carrier_ceremony_id: CEREMONY,
+        carrier_nonce: [0x42; 32],
+        claim_commitment: [0x43; 32],
+        relay_expires_at: 1_800_000_900,
+        expected_allocator_key: Some([0x44; 32]),
+    })
+    .unwrap()
+}
+
 fn offer() -> CredentialV2Object {
     CredentialV2Object::new(CredentialV2Kind::Offer, intent(), vec![0x81]).unwrap()
 }
@@ -124,8 +138,12 @@ fn successor(kind: CredentialV2Kind, predecessor: &CredentialV2Object) -> Creden
 
 fn endpoints() -> (CredentialV2Endpoint, CredentialV2Endpoint) {
     (
-        CredentialV2Endpoint::new(Side::Allocator, CEREMONY, Box::new(BodyVerifier::default())),
-        CredentialV2Endpoint::new(Side::Claimant, CEREMONY, Box::new(BodyVerifier::default())),
+        CredentialV2Endpoint::new(
+            Side::Allocator,
+            carrier(),
+            Box::new(BodyVerifier::default()),
+        ),
+        CredentialV2Endpoint::new(Side::Claimant, carrier(), Box::new(BodyVerifier::default())),
     )
 }
 
@@ -233,7 +251,7 @@ fn test_061_wrong_sender_predecessor_intent_and_verifier_refusal_are_terminal() 
 
     let mut refusing = CredentialV2Endpoint::new(
         Side::Claimant,
-        CEREMONY,
+        carrier(),
         Box::new(BodyVerifier {
             calls: 0,
             refuse: true,

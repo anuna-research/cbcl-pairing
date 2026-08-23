@@ -22,7 +22,7 @@ const INTENT: [u8; 32] = [0x66; 32];
 
 fn carrier() -> CredentialV2Carrier {
     CredentialV2Carrier::new(CredentialV2CarrierInput {
-        application_context: "https://chat.anuna.io".into(),
+        application_context: "https://chat.anuna.io/selfsame/v2".into(),
         relay_origin: "https://chat.anuna.io:9443".into(),
         mailbox_id: MAILBOX,
         carrier_ceremony_id: CEREMONY,
@@ -71,6 +71,26 @@ fn test_061_carrier_and_context_are_separate_canonical_v2_values() {
     assert_eq!(ci[0].as_text(), Some("cbcl-pairing-ci/credential-v2"));
     assert_eq!(ci[1], Value::Integer(2.into()));
     assert_ne!(context.public_context(), context.channel_identifier());
+}
+
+#[test]
+fn test_061_carrier_application_is_an_identifier_not_an_origin() {
+    let mut input = CredentialV2CarrierInput {
+        application_context: "https://chat.anuna.io".into(),
+        relay_origin: "https://chat.anuna.io:9443".into(),
+        mailbox_id: MAILBOX,
+        carrier_ceremony_id: CEREMONY,
+        carrier_nonce: NONCE,
+        claim_commitment: COMMITMENT,
+        relay_expires_at: 1_800_000_900,
+        expected_allocator_key: Some([0x77; 32]),
+    };
+    assert_eq!(
+        CredentialV2Carrier::new(input.clone()),
+        Err(cbcl_pairing::credential_v2::CredentialV2Error::Schema)
+    );
+    input.application_context = "https://chat.anuna.io/selfsame/v2".into();
+    assert!(CredentialV2Carrier::new(input).is_ok());
 }
 
 #[test]

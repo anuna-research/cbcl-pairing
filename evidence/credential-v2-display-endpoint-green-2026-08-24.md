@@ -42,6 +42,12 @@ git diff --check
 Result: all passed after formatting. Credential/v1 behavior and its display
 observations remain green through private borrowed accessors.
 
+The test-first pass also found and corrected an implementation mismatch: the
+initial carrier code accepted an HTTPS origin where `application-context`
+requires a canonical application identifier with a non-empty path. The carrier
+and endpoint now reuse that grammar, and the endpoint binds display authority
+to the recognised carrier application and ceremony.
+
 Checkpoint, recovered-receipt, and stronger independent-vector evidence remain
 open in the same `pairing-v2-channel` task. This evidence authorizes no
 production allocation, release, or deployment.

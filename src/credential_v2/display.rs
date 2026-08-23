@@ -715,7 +715,7 @@ pub fn credential_v2_intent_digest(offer_core_digest: [u8; 32]) -> [u8; 32] {
     digest.finalize().into()
 }
 
-fn recognise_application_id(value: &str) -> Result<&str, CredentialV2Error> {
+pub(super) fn recognise_application_id(value: &str) -> Result<&str, CredentialV2Error> {
     if value.is_empty() || value.len() > MAX_APPLICATION_ID_OCTETS {
         return Err(CredentialV2Error::Schema);
     }

@@ -1,6 +1,6 @@
 use super::{
-    bytes_field, decode_canonical, map_entries, optional_field, text_field, uint_field,
-    CredentialV2Error,
+    bytes_field, decode_canonical, display::recognise_application_id, map_entries, optional_field,
+    text_field, uint_field, CredentialV2Error,
 };
 use crate::wire::ClaimToken;
 use ciborium::Value;
@@ -39,7 +39,7 @@ pub struct CredentialV2Carrier(CredentialV2CarrierInput);
 impl CredentialV2Carrier {
     /// Validate and construct one carrier without any presence secret.
     pub fn new(input: CredentialV2CarrierInput) -> Result<Self, CredentialV2Error> {
-        validate_origin(&input.application_context, 2_048)?;
+        recognise_application_id(&input.application_context)?;
         validate_origin(&input.relay_origin, 272)?;
         let carrier = Self(input);
         encode_carrier(&carrier)?;
@@ -139,7 +139,7 @@ impl fmt::Debug for CredentialV2Presence {
 /// Encode one credential/v2 carrier with deterministic CBOR.
 pub fn encode_carrier(carrier: &CredentialV2Carrier) -> Result<Vec<u8>, CredentialV2Error> {
     let input = &carrier.0;
-    validate_origin(&input.application_context, 2_048)?;
+    recognise_application_id(&input.application_context)?;
     validate_origin(&input.relay_origin, 272)?;
     let mut entries = vec![
         (Value::Text("version".into()), Value::Integer(2.into())),

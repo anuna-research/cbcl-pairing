@@ -1,6 +1,6 @@
 use super::{
     decode_canonical, field, fixed_bytes, map_entries, recognise_credential_v2_intent,
-    CredentialV2Display, CredentialV2Error, CredentialV2IntentAuthority,
+    CredentialV2Carrier, CredentialV2Display, CredentialV2Error, CredentialV2IntentAuthority,
     CredentialV2IntentVerifier, CredentialV2Kind, CredentialV2Object, CredentialV2OfferParser,
 };
 use crate::wire::Side;
@@ -93,7 +93,7 @@ struct LastObject {
 #[derive(Debug)]
 pub struct CredentialV2Endpoint {
     side: Side,
-    carrier_ceremony_id: [u8; 32],
+    carrier: CredentialV2Carrier,
     phase: CredentialV2Phase,
     intent_digest: Option<[u8; 32]>,
     last: Option<LastObject>,
@@ -105,12 +105,12 @@ impl CredentialV2Endpoint {
     #[must_use]
     pub fn new(
         side: Side,
-        carrier_ceremony_id: [u8; 32],
+        carrier: CredentialV2Carrier,
         body_verifier: Box<dyn CredentialV2BodyVerifier>,
     ) -> Self {
         Self {
             side,
-            carrier_ceremony_id,
+            carrier,
             phase: CredentialV2Phase::Begin,
             intent_digest: None,
             last: None,
@@ -158,7 +158,9 @@ impl CredentialV2Endpoint {
         {
             return self.fail(CredentialV2Error::Phase);
         }
-        if authority.carrier_ceremony_id() != &self.carrier_ceremony_id {
+        if authority.carrier_ceremony_id() != self.carrier.carrier_ceremony_id()
+            || authority.application_id() != self.carrier.application_context()
+        {
             return self.fail(CredentialV2Error::Profile);
         }
         let display = match recognise_credential_v2_intent(object, authority, parser, verifier) {
@@ -215,7 +217,7 @@ impl CredentialV2Endpoint {
             Ok(logical) => logical,
             Err(error) => return self.fail(error),
         };
-        if logical.carrier_ceremony_id != self.carrier_ceremony_id {
+        if &logical.carrier_ceremony_id != self.carrier.carrier_ceremony_id() {
             return self.fail(CredentialV2Error::Profile);
         }
         let Some(last) = &self.last else {
