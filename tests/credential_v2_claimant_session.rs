@@ -20,6 +20,7 @@ use cbcl_pairing::{
     },
 };
 use ciborium::Value;
+use sha2::Digest as _;
 
 const NOW: u64 = 1_800_000_000;
 const EXPIRY: u64 = NOW + 900;
@@ -127,6 +128,36 @@ fn successor(kind: CredentialV2Kind, predecessor: &CredentialV2Object) -> Creden
     ]))
     .unwrap();
     CredentialV2Object::new(kind, *predecessor.intent_digest(), body).unwrap()
+}
+
+fn receipt(predecessor: &CredentialV2Object) -> CredentialV2Object {
+    let final_status_jws = "e30.e30.AA";
+    let final_status_digest = sha2::Sha256::digest(final_status_jws.as_bytes());
+    let body = cbor2::to_canonical_vec(&Value::Map(vec![
+        (
+            Value::Text("carrierCeremonyId".into()),
+            Value::Bytes(CEREMONY.to_vec()),
+        ),
+        (
+            Value::Text("predecessorDigest".into()),
+            Value::Bytes(predecessor.content_hash().to_vec()),
+        ),
+        (
+            Value::Text("finalStatusJws".into()),
+            Value::Text(final_status_jws.into()),
+        ),
+        (
+            Value::Text("finalStatusDigest".into()),
+            Value::Bytes(final_status_digest.to_vec()),
+        ),
+    ]))
+    .unwrap();
+    CredentialV2Object::new(
+        CredentialV2Kind::Receipt,
+        *predecessor.intent_digest(),
+        body,
+    )
+    .unwrap()
 }
 
 fn carrier() -> CredentialV2Carrier {
@@ -500,4 +531,36 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
             .unwrap(),
         payload.as_bytes()
     );
+
+    let payload_ack = claimant
+        .receive_durable(
+            &server(ServerMessage::Acknowledged { seq: 5 }),
+            NOW,
+            &wrapping_key,
+            CredentialV2CheckpointNonce::from_csprng([0x7c; 12]),
+        )
+        .unwrap();
+    assert!(matches!(
+        payload_ack.as_slice(),
+        [CredentialV2ClaimantEffect::Checkpoint { generation: 4, .. }]
+    ));
+    assert!(claimant.checkpoint_persisted(4).unwrap().is_empty());
+
+    let receipt = receipt(&payload);
+    let receipt_frame = allocator_channel.seal(receipt.as_bytes()).unwrap();
+    let recovered = claimant
+        .receive_recovered_receipt(&server(ServerMessage::Frame {
+            peer_seq: 4,
+            body: encode_frame(&receipt_frame).unwrap(),
+        }))
+        .unwrap();
+    assert_eq!(recovered.object(), &receipt);
+    assert!(claimant.has_pending_recovered_receipt());
+
+    // Merely authenticating and exposing the receipt cannot acknowledge it.
+    // The wallet first verifies the signed final status, live WebFinger, and
+    // its durable installed-slot transition, then commits this one-use edge.
+    let committed = claimant.commit_recovered_receipt(recovered).unwrap();
+    assert_eq!(sent(&committed), vec![ClientMessage::Ack { peer_seq: 4 }]);
+    assert!(!claimant.has_pending_recovered_receipt());
 }

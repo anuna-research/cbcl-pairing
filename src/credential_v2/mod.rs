@@ -27,7 +27,8 @@ pub use carrier::{
     CredentialV2Presence,
 };
 pub use claimant::{
-    CredentialV2ClaimantEffect, CredentialV2ClaimantOfferVerifier, CredentialV2ClaimantSession,
+    CredentialV2ClaimantEffect, CredentialV2ClaimantOfferVerifier,
+    CredentialV2ClaimantRecoveredReceipt, CredentialV2ClaimantSession,
     CredentialV2ClaimantSessionInput,
 };
 pub use channel::{PendingCredentialV2Channel, SecureCredentialV2Channel};

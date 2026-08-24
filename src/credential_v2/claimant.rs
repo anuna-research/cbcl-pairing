@@ -2,8 +2,9 @@ use super::{
     decode_frame, decode_object, encode_frame, CredentialV2Advance, CredentialV2BodyVerifier,
     CredentialV2Carrier, CredentialV2CheckpointNonce, CredentialV2Context, CredentialV2Endpoint,
     CredentialV2Error, CredentialV2Frame, CredentialV2Kind, CredentialV2Phase,
-    CredentialV2Presence, CredentialV2PresenceCode, CredentialV2RelayState, EndpointCheckpointV2,
-    PendingCredentialV2Channel, SecureCredentialV2Channel,
+    CredentialV2Presence, CredentialV2PresenceCode, CredentialV2RecoveredReceiptAuthority,
+    CredentialV2RelayState, EndpointCheckpointV2, PendingCredentialV2Channel,
+    SecureCredentialV2Channel,
 };
 use crate::{
     cpace,
@@ -74,6 +75,32 @@ pub enum CredentialV2ClaimantEffect {
     Terminal,
 }
 
+/// One authenticated receipt frame withheld from the relay acknowledgement.
+///
+/// The value is intentionally non-cloneable and its recovery authority remains
+/// private. A wallet may inspect [`Self::object`] and verify its application
+/// final status, but only the claimant session that opened the frame can consume
+/// the value through [`CredentialV2ClaimantSession::commit_recovered_receipt`].
+pub struct CredentialV2ClaimantRecoveredReceipt {
+    object: super::CredentialV2Object,
+    authority: CredentialV2RecoveredReceiptAuthority,
+    peer_seq: u8,
+}
+
+impl CredentialV2ClaimantRecoveredReceipt {
+    /// Borrow the endpoint-authenticated Receipt object for application checks.
+    #[must_use]
+    pub const fn object(&self) -> &super::CredentialV2Object {
+        &self.object
+    }
+}
+
+impl fmt::Debug for CredentialV2ClaimantRecoveredReceipt {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("CredentialV2ClaimantRecoveredReceipt([AUTHENTICATED])")
+    }
+}
+
 impl fmt::Debug for CredentialV2ClaimantEffect {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -136,6 +163,7 @@ pub struct CredentialV2ClaimantSession {
     authenticated_offer: Option<super::CredentialV2Object>,
     persistence_gate: Option<u64>,
     after_persist: Vec<CredentialV2ClaimantEffect>,
+    pending_recovered_receipt: bool,
 }
 
 impl fmt::Debug for CredentialV2ClaimantSession {
@@ -170,6 +198,7 @@ impl CredentialV2ClaimantSession {
             authenticated_offer: None,
             persistence_gate: None,
             after_persist: Vec::new(),
+            pending_recovered_receipt: false,
         })
     }
 
@@ -219,6 +248,7 @@ impl CredentialV2ClaimantSession {
             authenticated_offer: None,
             persistence_gate: None,
             after_persist: Vec::new(),
+            pending_recovered_receipt: false,
         })
     }
 
@@ -455,6 +485,95 @@ impl CredentialV2ClaimantSession {
             _ => return Err(CredentialV2Error::Phase),
         };
         self.checkpoint_current(wrapping_key, nonce, now, expiry, Vec::new())
+    }
+
+    /// Open and authenticate the sole post-payload Receipt without releasing
+    /// its relay acknowledgement or advancing the terminal endpoint edge.
+    ///
+    /// This split lets the wallet verify the application-signed final status,
+    /// observe reciprocal WebFinger, and durably install the grant first. A
+    /// malformed or unauthenticated frame terminates this in-memory session;
+    /// the last durable payload checkpoint remains the recovery authority.
+    pub fn receive_recovered_receipt(
+        &mut self,
+        input: &[u8],
+    ) -> Result<CredentialV2ClaimantRecoveredReceipt, CredentialV2Error> {
+        if self.persistence_gate.is_some()
+            || self.phase != ClaimantPhase::Established
+            || self.endpoint_phase()? != CredentialV2Phase::PayloadSent
+            || self.pending_recovered_receipt
+            || self.has_cached_outbound_frame()
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        let result = (|| {
+            let ServerMessage::Frame { peer_seq, body } =
+                decode_server_message(input).map_err(|_| CredentialV2Error::Schema)?
+            else {
+                return Err(CredentialV2Error::Phase);
+            };
+            let frame = decode_frame(&body)?;
+            self.relay_mut()?.accept_peer_sequence(peer_seq)?;
+            let plaintext = self
+                .channel
+                .as_mut()
+                .ok_or(CredentialV2Error::Phase)?
+                .open(&frame)?;
+            let object = decode_object(&plaintext)?;
+            let authority = self
+                .endpoint
+                .as_mut()
+                .ok_or(CredentialV2Error::Phase)?
+                .authenticate_recovered_receipt(&object)?;
+            Ok(CredentialV2ClaimantRecoveredReceipt {
+                object,
+                authority,
+                peer_seq,
+            })
+        })();
+        match result {
+            Ok(receipt) => {
+                self.pending_recovered_receipt = true;
+                Ok(receipt)
+            }
+            Err(error) => {
+                self.terminate();
+                Err(error)
+            }
+        }
+    }
+
+    /// Consume one authenticated Receipt only after the wallet's installed
+    /// state is durable, then release the exact relay acknowledgement.
+    pub fn commit_recovered_receipt(
+        &mut self,
+        receipt: CredentialV2ClaimantRecoveredReceipt,
+    ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
+        if !self.pending_recovered_receipt
+            || self.persistence_gate.is_some()
+            || self.phase != ClaimantPhase::Established
+            || self.endpoint_phase()? != CredentialV2Phase::PayloadSent
+            || self.has_cached_outbound_frame()
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        let acknowledgement = relay_message(ClientMessage::Ack {
+            peer_seq: receipt.peer_seq,
+        })?;
+        self.endpoint
+            .as_mut()
+            .ok_or(CredentialV2Error::Phase)?
+            .recover_receipt(&receipt.object, receipt.authority)?;
+        self.pending_recovered_receipt = false;
+        self.terminate();
+        Ok(vec![CredentialV2ClaimantEffect::Send(acknowledgement)])
+    }
+
+    /// Report whether a verified Receipt is waiting on the consumer's durable
+    /// install boundary.
+    #[must_use]
+    pub const fn has_pending_recovered_receipt(&self) -> bool {
+        self.pending_recovered_receipt
     }
 
     /// Seal and retain the reverse payload under a null-expiry checkpoint
@@ -814,6 +933,7 @@ impl CredentialV2ClaimantSession {
         self.authenticated_offer = None;
         self.persistence_gate = None;
         self.after_persist.clear();
+        self.pending_recovered_receipt = false;
     }
 }
 
