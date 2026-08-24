@@ -1,6 +1,6 @@
 use super::{
     bytes_field, decode_canonical, display::recognise_application_id, map_entries, optional_field,
-    text_field, uint_field, CredentialV2Error,
+    text_field, uint_field, CredentialV2Error, CredentialV2PresenceCode,
 };
 use crate::wire::ClaimToken;
 use ciborium::Value;
@@ -131,6 +131,12 @@ impl CredentialV2Presence {
 
     pub(super) fn checkpoint_parts(&self) -> (&[u8; 16], Option<&ClaimToken>) {
         (&self.cpace_secret, self.claim_token.as_ref())
+    }
+
+    pub(super) fn display_code(&self) -> Option<String> {
+        self.claim_token.as_ref().map(|claim_token| {
+            CredentialV2PresenceCode::new(*self.cpace_secret, *claim_token.as_bytes()).to_string()
+        })
     }
 
     pub(super) fn from_checkpoint(cpace_secret: [u8; 16], claim_token: Option<[u8; 16]>) -> Self {

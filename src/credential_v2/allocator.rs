@@ -126,6 +126,7 @@ pub struct CredentialV2AllocatorSession {
     state: AllocatorState,
     persistence_gate: Option<u64>,
     after_persist: Vec<CredentialV2AllocatorEffect>,
+    resume_after_welcome: bool,
 }
 
 impl fmt::Debug for CredentialV2AllocatorSession {
@@ -166,12 +167,82 @@ impl CredentialV2AllocatorSession {
             state: AllocatorState::AwaitWelcome,
             persistence_gate: None,
             after_persist: Vec::new(),
+            resume_after_welcome: false,
+        })
+    }
+
+    /// Restore an allocator bootstrap or established endpoint from one exact
+    /// sealed checkpoint. Caller-held carrier, generation, profile digest and
+    /// wrapping key are all mandatory bindings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore(
+        checkpoint: &[u8],
+        wrapping_key: &[u8; 32],
+        carrier: CredentialV2Carrier,
+        expected_generation: u64,
+        expected_profile_digest: [u8; 32],
+        now: u64,
+        body_verifier: Box<dyn CredentialV2BodyVerifier>,
+    ) -> Result<Self, CredentialV2Error> {
+        if let Ok(bootstrap) = CredentialV2AllocatorBootstrap::restore_checkpoint(
+            checkpoint,
+            wrapping_key,
+            &carrier,
+            expected_generation,
+            now,
+        ) {
+            if bootstrap.profile_digest() != &expected_profile_digest {
+                return Err(CredentialV2Error::Profile);
+            }
+            return Ok(Self {
+                template: carrier.clone(),
+                presence: None,
+                cpace_scalar: Zeroizing::new([0; 32]),
+                profile_digest: expected_profile_digest,
+                claim_commitment: *carrier.claim_commitment(),
+                wrapping_key: Zeroizing::new(*wrapping_key),
+                body_verifier: Some(body_verifier),
+                state: AllocatorState::Bootstrap(Box::new(bootstrap)),
+                persistence_gate: None,
+                after_persist: Vec::new(),
+                resume_after_welcome: true,
+            });
+        }
+
+        let restored = CredentialV2Endpoint::restore_checkpoint(
+            checkpoint,
+            wrapping_key,
+            Side::Allocator,
+            &carrier,
+            expected_generation,
+            now,
+            body_verifier,
+        )?;
+        let (endpoint, channel, relay) = restored.into_parts();
+        Ok(Self {
+            template: carrier.clone(),
+            presence: None,
+            cpace_scalar: Zeroizing::new([0; 32]),
+            profile_digest: expected_profile_digest,
+            claim_commitment: *carrier.claim_commitment(),
+            wrapping_key: Zeroizing::new(*wrapping_key),
+            body_verifier: None,
+            state: AllocatorState::Established {
+                endpoint: Box::new(endpoint),
+                channel: Box::new(channel),
+                relay: Box::new(relay),
+            },
+            persistence_gate: None,
+            after_persist: Vec::new(),
+            resume_after_welcome: true,
         })
     }
 
     /// First canonical relay binding frame.
     pub fn start(&self) -> Result<Vec<u8>, CredentialV2Error> {
-        if !matches!(self.state, AllocatorState::AwaitWelcome) || self.persistence_gate.is_some() {
+        if (!matches!(self.state, AllocatorState::AwaitWelcome) && !self.resume_after_welcome)
+            || self.persistence_gate.is_some()
+        {
             return Err(CredentialV2Error::Phase);
         }
         relay_message(ClientMessage::Bind)
@@ -184,11 +255,64 @@ impl CredentialV2AllocatorSession {
     /// checkpoint. Only this SHA-256 commitment may cross into browser script.
     pub fn receipt_recovery_commitment(&self) -> Result<[u8; 32], CredentialV2Error> {
         match &self.state {
-            AllocatorState::Established { endpoint, channel, .. } => {
-                channel.receipt_recovery_commitment(&endpoint.carrier)
-            }
+            AllocatorState::Established {
+                endpoint, channel, ..
+            } => channel.receipt_recovery_commitment(&endpoint.carrier),
             _ => Err(CredentialV2Error::Phase),
         }
+    }
+
+    /// Return the restored or live endpoint phase after Finished.
+    #[must_use]
+    pub fn endpoint_phase(&self) -> Option<super::CredentialV2Phase> {
+        match &self.state {
+            AllocatorState::Established { endpoint, .. } => Some(endpoint.phase()),
+            _ => None,
+        }
+    }
+
+    /// Return the restored bootstrap phase before Finished establishes the
+    /// protected application channel.
+    #[must_use]
+    pub fn bootstrap_phase(&self) -> Option<super::CredentialV2AllocatorBootstrapPhase> {
+        match &self.state {
+            AllocatorState::Bootstrap(bootstrap) => Some(bootstrap.phase()),
+            _ => None,
+        }
+    }
+
+    /// Reconstruct the human-presence code only while its one-use claim token
+    /// remains inside a restored bootstrap checkpoint.
+    pub fn presence_code(&self) -> Option<String> {
+        match &self.state {
+            AllocatorState::Bootstrap(bootstrap) => bootstrap.presence_code(),
+            _ => None,
+        }
+    }
+
+    /// Return the protected channel transcript after Finished.
+    #[must_use]
+    pub fn transcript_hash(&self) -> Option<[u8; 64]> {
+        match &self.state {
+            AllocatorState::Established { channel, .. } => Some(channel.transcript_hash()),
+            _ => None,
+        }
+    }
+
+    /// Reconstruct only the exact last authenticated peer object retained by
+    /// the endpoint checkpoint. Locally authored objects are not presented as
+    /// received input.
+    pub fn last_received_object(&self) -> Result<Option<CredentialV2Object>, CredentialV2Error> {
+        let AllocatorState::Established { endpoint, .. } = &self.state else {
+            return Ok(None);
+        };
+        let Some(last) = endpoint.last.as_ref() else {
+            return Ok(None);
+        };
+        if last.sender == Side::Allocator {
+            return Ok(None);
+        }
+        last.bytes.as_deref().map(decode_object).transpose()
     }
 
     /// Apply one complete relay response. A checkpoint effect is always alone.
@@ -247,6 +371,10 @@ impl CredentialV2AllocatorSession {
         checkpoint_nonce: CredentialV2CheckpointNonce,
     ) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
         match message {
+            ServerMessage::Welcome if self.resume_after_welcome => {
+                self.resume_after_welcome = false;
+                self.reopen_effects()
+            }
             ServerMessage::Welcome if matches!(self.state, AllocatorState::AwaitWelcome) => {
                 self.state = AllocatorState::AwaitAllocation;
                 Ok(vec![CredentialV2AllocatorEffect::Send(relay_message(
@@ -281,6 +409,39 @@ impl CredentialV2AllocatorSession {
             }
             _ => Err(CredentialV2Error::Phase),
         }
+    }
+
+    fn reopen_effects(&self) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
+        let (carrier, relay, cached) = match &self.state {
+            AllocatorState::Bootstrap(bootstrap) => (
+                bootstrap.carrier(),
+                bootstrap.relay_state(),
+                bootstrap.cached_outbound_frame(),
+            ),
+            AllocatorState::Established {
+                endpoint, relay, ..
+            } => (
+                &endpoint.carrier,
+                relay.as_ref(),
+                relay.cached_outbound_frame(),
+            ),
+            _ => return Err(CredentialV2Error::Phase),
+        };
+        let mut effects = vec![CredentialV2AllocatorEffect::Send(relay_message(
+            ClientMessage::Open {
+                mailbox_id: *carrier.mailbox_id(),
+                membership_token: *relay.membership_token(),
+            },
+        )?)];
+        if let Some(frame) = cached {
+            effects.push(CredentialV2AllocatorEffect::Send(relay_message(
+                ClientMessage::Put {
+                    seq: relay.cached_application_sequence()?,
+                    body: super::encode_frame(frame)?,
+                },
+            )?));
+        }
+        Ok(effects)
     }
 
     fn allocated(

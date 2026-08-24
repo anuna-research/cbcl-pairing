@@ -6,9 +6,9 @@
 mod allocator;
 mod bootstrap;
 mod carrier;
-mod claimant;
 mod channel;
 mod checkpoint;
+mod claimant;
 mod context;
 mod display;
 mod endpoint;
@@ -26,14 +26,14 @@ pub use carrier::{
     decode_carrier, encode_carrier, CredentialV2Carrier, CredentialV2CarrierInput,
     CredentialV2Presence,
 };
+pub use channel::{PendingCredentialV2Channel, SecureCredentialV2Channel};
+pub use checkpoint::{
+    CredentialV2CheckpointNonce, EndpointCheckpointV2, RestoredCredentialV2Endpoint,
+};
 pub use claimant::{
     CredentialV2ClaimantEffect, CredentialV2ClaimantOfferVerifier,
     CredentialV2ClaimantRecoveredReceipt, CredentialV2ClaimantSession,
     CredentialV2ClaimantSessionInput,
-};
-pub use channel::{PendingCredentialV2Channel, SecureCredentialV2Channel};
-pub use checkpoint::{
-    CredentialV2CheckpointNonce, EndpointCheckpointV2, RestoredCredentialV2Endpoint,
 };
 pub use context::CredentialV2Context;
 pub use display::{

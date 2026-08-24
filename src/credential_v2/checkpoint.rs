@@ -422,6 +422,8 @@ fn encode_inner(
         }
         None => output.push(0),
     }
+    let verifier_state = endpoint.body_verifier.checkpoint_state()?;
+    append_bytes(&mut output, &verifier_state)?;
     output.extend_from_slice(&generation.to_be_bytes());
     output.extend_from_slice(&nonce);
     append_channel(&mut output, &channel.checkpoint_snapshot());
@@ -435,7 +437,7 @@ fn decode_inner(
     expected_carrier: &CredentialV2Carrier,
     expected_generation: u64,
     expected_nonce: [u8; 12],
-    body_verifier: Box<dyn CredentialV2BodyVerifier>,
+    mut body_verifier: Box<dyn CredentialV2BodyVerifier>,
 ) -> Result<
     (
         CredentialV2Endpoint,
@@ -491,6 +493,8 @@ fn decode_inner(
         }
         _ => return Err(CredentialV2Error::Schema),
     };
+    let verifier_state = cursor.length_prefixed_allow_empty(MAX_PLAINTEXT)?;
+    body_verifier.restore_checkpoint_state(verifier_state)?;
     let generation = cursor.u64()?;
     let nonce = cursor.array()?;
     let channel = decode_channel(&mut cursor)?;
@@ -737,9 +741,20 @@ impl<'a> ByteCursor<'a> {
     }
 
     fn length_prefixed(&mut self, maximum: usize) -> Result<&'a [u8], CredentialV2Error> {
+        let value = self.length_prefixed_allow_empty(maximum)?;
+        if value.is_empty() {
+            return Err(CredentialV2Error::Size);
+        }
+        Ok(value)
+    }
+
+    fn length_prefixed_allow_empty(
+        &mut self,
+        maximum: usize,
+    ) -> Result<&'a [u8], CredentialV2Error> {
         let length = usize::try_from(u32::from_be_bytes(self.array()?))
             .map_err(|_| CredentialV2Error::Size)?;
-        if length == 0 || length > maximum {
+        if length > maximum {
             return Err(CredentialV2Error::Size);
         }
         self.take(length)

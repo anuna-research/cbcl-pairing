@@ -17,8 +17,7 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 const MAX_PLAINTEXT: usize = 69_556;
-const RECEIPT_RECOVERY_TOKEN_DOMAIN: &[u8] =
-    b"selfsame credential/v2 receipt recovery token v1\0";
+const RECEIPT_RECOVERY_TOKEN_DOMAIN: &[u8] = b"selfsame credential/v2 receipt recovery token v1\0";
 const RECEIPT_RECOVERY_COMMITMENT_DOMAIN: &[u8] =
     b"selfsame credential/v2 receipt recovery commitment v1\0";
 
@@ -326,9 +325,7 @@ impl SecureCredentialV2Channel {
     /// Derive the Selfsame receipt-recovery token without releasing it across
     /// an adapter boundary. The exporter and transcript are both sealed inside
     /// every endpoint checkpoint, so restoration reproduces the exact token.
-    pub(super) fn receipt_recovery_token(
-        &self,
-    ) -> Result<Zeroizing<[u8; 32]>, CredentialV2Error> {
+    pub(super) fn receipt_recovery_token(&self) -> Result<Zeroizing<[u8; 32]>, CredentialV2Error> {
         let mut mac = Hmac::<Sha256>::new_from_slice(self.exporter.as_slice())
             .map_err(|_| CredentialV2Error::KeySchedule)?;
         mac.update(RECEIPT_RECOVERY_TOKEN_DOMAIN);
@@ -628,16 +625,25 @@ mod independent_tests {
         let mut allocator_channel = pending_allocator.confirm(&finished_claimant).unwrap();
         let claimant_channel = pending_claimant.confirm(&finished_allocator).unwrap();
         assert_eq!(
-            allocator_channel.receipt_recovery_token().unwrap().as_slice(),
+            allocator_channel
+                .receipt_recovery_token()
+                .unwrap()
+                .as_slice(),
             oracle_bytes(&oracle, "receipt_recovery_token")
         );
         assert_eq!(
-            allocator_channel.receipt_recovery_commitment(&carrier).unwrap(),
+            allocator_channel
+                .receipt_recovery_commitment(&carrier)
+                .unwrap(),
             oracle_bytes(&oracle, "receipt_recovery_commitment").as_slice()
         );
         assert_eq!(
-            claimant_channel.receipt_recovery_commitment(&carrier).unwrap(),
-            allocator_channel.receipt_recovery_commitment(&carrier).unwrap()
+            claimant_channel
+                .receipt_recovery_commitment(&carrier)
+                .unwrap(),
+            allocator_channel
+                .receipt_recovery_commitment(&carrier)
+                .unwrap()
         );
         let aad = sealed_aad(
             Direction::AllocatorToClaimant,

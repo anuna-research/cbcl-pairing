@@ -82,6 +82,22 @@ impl CredentialV2LogicalBody<'_> {
 pub trait CredentialV2BodyVerifier: fmt::Debug + Send {
     /// Recognise the complete body and return only a closed verdict.
     fn verify(&mut self, body: &CredentialV2LogicalBody<'_>) -> Result<(), CredentialV2Error>;
+
+    /// Return the consumer verifier state that is inseparable from an endpoint
+    /// checkpoint. The default is the stateless verifier profile.
+    fn checkpoint_state(&self) -> Result<Vec<u8>, CredentialV2Error> {
+        Ok(Vec::new())
+    }
+
+    /// Restore the exact consumer verifier state authenticated by the sealed
+    /// endpoint checkpoint. Stateless verifiers accept only the empty value.
+    fn restore_checkpoint_state(&mut self, state: &[u8]) -> Result<(), CredentialV2Error> {
+        if state.is_empty() {
+            Ok(())
+        } else {
+            Err(CredentialV2Error::Schema)
+        }
+    }
 }
 
 /// One-use authority minted only after the registered receipt verifier succeeds.

@@ -229,6 +229,14 @@ impl CredentialV2AllocatorBootstrap {
         (self.checkpoint_generation, self.checkpoint_nonce)
     }
 
+    pub(super) const fn profile_digest(&self) -> &[u8; 32] {
+        &self.profile_digest
+    }
+
+    pub(super) fn presence_code(&self) -> Option<String> {
+        self.presence.display_code()
+    }
+
     /// Borrow the exact frame that recovery must retransmit before any advance.
     #[must_use]
     pub const fn cached_outbound_frame(&self) -> Option<&CredentialV2Frame> {

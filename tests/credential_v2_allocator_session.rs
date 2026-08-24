@@ -7,7 +7,7 @@ use cbcl_pairing::{
         CredentialV2AllocatorSessionInput, CredentialV2BodyVerifier, CredentialV2CheckpointNonce,
         CredentialV2Context, CredentialV2Error, CredentialV2Frame, CredentialV2Kind,
         CredentialV2LogicalBody, CredentialV2Object, CredentialV2Presence,
-        PendingCredentialV2Channel,
+        CredentialV2PresenceCode, PendingCredentialV2Channel,
     },
     wire::{decode_client_message, encode_server_message, ClientMessage, ServerMessage, Side},
 };
@@ -249,16 +249,59 @@ fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame()
     let intent_digest = [0x51; 32];
     let offer = CredentialV2Object::new(CredentialV2Kind::Offer, intent_digest, vec![0xa0])
         .expect("bounded offer object");
-    one_checkpoint(
-        allocator
-            .prepare_application_object(
-                &offer,
-                NOW,
-                CredentialV2CheckpointNonce::from_csprng([0x52; 12]),
-            )
-            .unwrap(),
+    let offer_pending = allocator
+        .prepare_application_object(
+            &offer,
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x52; 12]),
+        )
+        .unwrap();
+    let [CredentialV2AllocatorEffect::Checkpoint {
+        generation: 6,
+        checkpoint,
+        carrier: checkpoint_carrier,
+    }] = offer_pending.as_slice()
+    else {
+        panic!("the cached offer must be sealed before release")
+    };
+    assert_eq!(decode_carrier(checkpoint_carrier).unwrap(), carrier);
+    let mut restored = CredentialV2AllocatorSession::restore(
+        checkpoint.as_bytes(),
+        &WRAPPING_KEY,
+        carrier.clone(),
         6,
+        PROFILE_DIGEST,
+        NOW,
+        Box::new(AcceptBodies),
+    )
+    .unwrap();
+    assert_eq!(restored.presence_code(), None);
+    assert_eq!(
+        decode_client_message(&restored.start().unwrap()).unwrap(),
+        ClientMessage::Bind,
     );
+    let reopened = restored
+        .receive(
+            &server(ServerMessage::Welcome),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x56; 12]),
+        )
+        .unwrap();
+    let reopened_commands = sent(&reopened);
+    assert!(matches!(
+        reopened_commands[0],
+        ClientMessage::Open {
+            mailbox_id: MAILBOX,
+            membership_token: MEMBERSHIP,
+        }
+    ));
+    let ClientMessage::Put {
+        seq: 2,
+        body: reopened_offer,
+    } = &reopened_commands[1]
+    else {
+        panic!("restart must resend only the cached offer frame")
+    };
     let offer_effects = allocator.checkpoint_persisted(6).unwrap();
     let offer_commands = sent(&offer_effects);
     let [ClientMessage::Put {
@@ -268,6 +311,7 @@ fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame()
     else {
         panic!("offer is the exact next relay frame")
     };
+    assert_eq!(reopened_offer, sealed_offer);
     let sealed_offer = decode_frame(sealed_offer).unwrap();
     assert_eq!(
         claimant_channel.open(&sealed_offer).unwrap(),
@@ -367,4 +411,81 @@ fn carrier_and_checkpoint_are_withheld_on_allocation_mismatch_or_expiry() {
             )
             .is_err());
     }
+}
+
+#[test]
+fn allocator_restores_the_bound_membership_and_only_the_cached_frame() {
+    let mut allocator = CredentialV2AllocatorSession::new(input(), Box::new(AcceptBodies)).unwrap();
+    allocator
+        .receive(
+            &server(ServerMessage::Welcome),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x61; 12]),
+        )
+        .unwrap();
+    let allocated = allocator
+        .receive(
+            &server(ServerMessage::AllocatedV2 {
+                mailbox_id: MAILBOX,
+                membership_token: MEMBERSHIP,
+                expires_at: EXPIRY,
+            }),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x62; 12]),
+        )
+        .unwrap();
+    let [CredentialV2AllocatorEffect::Checkpoint {
+        generation: 1,
+        checkpoint,
+        carrier,
+    }] = allocated.as_slice()
+    else {
+        panic!("allocation must be one checkpoint")
+    };
+    let carrier = decode_carrier(carrier).unwrap();
+    let checkpoint = checkpoint.as_bytes().to_vec();
+
+    let mut restored = CredentialV2AllocatorSession::restore(
+        &checkpoint,
+        &WRAPPING_KEY,
+        carrier.clone(),
+        1,
+        PROFILE_DIGEST,
+        NOW,
+        Box::new(AcceptBodies),
+    )
+    .unwrap();
+    assert_eq!(
+        restored.presence_code(),
+        Some(CredentialV2PresenceCode::new(CPACE_SECRET, CLAIM_TOKEN).to_string()),
+    );
+    assert_eq!(
+        decode_client_message(&restored.start().unwrap()).unwrap(),
+        ClientMessage::Bind,
+    );
+    let reopened = restored
+        .receive(
+            &server(ServerMessage::Welcome),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x63; 12]),
+        )
+        .unwrap();
+    assert_eq!(
+        sent(&reopened),
+        vec![ClientMessage::Open {
+            mailbox_id: MAILBOX,
+            membership_token: MEMBERSHIP,
+        }],
+    );
+
+    assert!(CredentialV2AllocatorSession::restore(
+        &checkpoint,
+        &WRAPPING_KEY,
+        carrier,
+        1,
+        [0xff; 32],
+        NOW,
+        Box::new(AcceptBodies),
+    )
+    .is_err());
 }
