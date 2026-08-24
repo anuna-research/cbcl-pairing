@@ -470,6 +470,20 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
         restored.into_parts().0.phase(),
         CredentialV2Phase::PayloadSent
     );
+    let mut recovered = CredentialV2ClaimantSession::restore(
+        checkpoint.as_bytes(),
+        &wrapping_key,
+        recognised_carrier.clone(),
+        3,
+        EXPIRY + 1,
+        Box::new(AcceptBodies),
+    )
+    .unwrap();
+    let recovered_commands = sent(&recovered.resume_cached_frame().unwrap());
+    assert!(matches!(
+        recovered_commands.as_slice(),
+        [ClientMessage::Put { seq: 5, .. }]
+    ));
 
     let payload_release = claimant.checkpoint_persisted(3).unwrap();
     let payload_commands = sent(&payload_release);

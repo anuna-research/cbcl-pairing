@@ -173,6 +173,55 @@ impl CredentialV2ClaimantSession {
         })
     }
 
+    /// Restore only a post-final claimant endpoint from an exact sealed
+    /// checkpoint. Preliminary decisions and display authority are never
+    /// reconstructed by this path.
+    pub fn restore(
+        checkpoint: &[u8],
+        wrapping_key: &[u8; 32],
+        carrier: CredentialV2Carrier,
+        expected_generation: u64,
+        now: u64,
+        body_verifier: Box<dyn CredentialV2BodyVerifier>,
+    ) -> Result<Self, CredentialV2Error> {
+        let restored = CredentialV2Endpoint::restore_checkpoint(
+            checkpoint,
+            wrapping_key,
+            Side::Claimant,
+            &carrier,
+            expected_generation,
+            now,
+            body_verifier,
+        )?;
+        let (endpoint, channel, relay) = restored.into_parts();
+        if !matches!(
+            endpoint.phase(),
+            CredentialV2Phase::FinalApproved | CredentialV2Phase::PayloadSent
+        ) {
+            return Err(CredentialV2Error::Phase);
+        }
+        Ok(Self {
+            carrier,
+            presence: None,
+            claim_token: None,
+            cpace_scalar: Zeroizing::new([0; 32]),
+            profile_digest: [0; 32],
+            phase: ClaimantPhase::Established,
+            relay: Some(relay),
+            local_share: None,
+            peer_share: None,
+            pending_channel: None,
+            peer_finished: None,
+            endpoint: Some(Box::new(endpoint)),
+            channel: Some(Box::new(channel)),
+            body_verifier: None,
+            offer_verifier: None,
+            authenticated_offer_body: None,
+            persistence_gate: None,
+            after_persist: Vec::new(),
+        })
+    }
+
     /// Return the first version-binding relay frame.
     pub fn start(&self) -> Result<Vec<u8>, CredentialV2Error> {
         if self.phase != ClaimantPhase::AwaitWelcome {
@@ -328,6 +377,30 @@ impl CredentialV2ClaimantSession {
         }
         self.persistence_gate = None;
         Ok(std::mem::take(&mut self.after_persist))
+    }
+
+    /// Re-emit only the exact frame already covered by the restored durable
+    /// checkpoint. An empty cache produces no effect.
+    pub fn resume_cached_frame(
+        &mut self,
+    ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
+        if self.persistence_gate.is_some()
+            || self.phase != ClaimantPhase::Established
+            || !self.has_durable_endpoint_phase()
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        let relay = self.relay.as_ref().ok_or(CredentialV2Error::Phase)?;
+        let Some(frame) = relay.cached_outbound_frame() else {
+            return Ok(Vec::new());
+        };
+        let sequence = relay.cached_application_sequence()?;
+        Ok(vec![CredentialV2ClaimantEffect::Send(relay_message(
+            ClientMessage::Put {
+                seq: sequence,
+                body: encode_frame(frame)?,
+            },
+        )?)])
     }
 
     /// Apply an acknowledgement after final approval and checkpoint the
