@@ -553,6 +553,23 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
         payload.as_bytes()
     );
 
+    let mut direct_recovery = CredentialV2ClaimantSession::restore(
+        checkpoint.as_bytes(),
+        &wrapping_key,
+        recognised_carrier.clone(),
+        3,
+        EXPIRY + 1,
+        Box::new(AcceptBodies),
+    )
+    .unwrap();
+    let recovered_receipt = direct_recovery
+        .authenticate_recovered_receipt_object(receipt(&payload))
+        .unwrap();
+    assert!(direct_recovery
+        .commit_recovered_receipt(recovered_receipt)
+        .unwrap()
+        .is_empty());
+
     let payload_ack = claimant
         .receive_durable(
             &server(ServerMessage::Acknowledged { seq: 5 }),

@@ -84,7 +84,7 @@ pub enum CredentialV2ClaimantEffect {
 pub struct CredentialV2ClaimantRecoveredReceipt {
     object: super::CredentialV2Object,
     authority: CredentialV2RecoveredReceiptAuthority,
-    peer_seq: u8,
+    peer_seq: Option<u8>,
 }
 
 impl CredentialV2ClaimantRecoveredReceipt {
@@ -565,7 +565,7 @@ impl CredentialV2ClaimantSession {
             Ok(CredentialV2ClaimantRecoveredReceipt {
                 object,
                 authority,
-                peer_seq,
+                peer_seq: Some(peer_seq),
             })
         })();
         match result {
@@ -580,6 +580,36 @@ impl CredentialV2ClaimantSession {
         }
     }
 
+    /// Authenticate the exact Receipt reconstructed from an HTTPS recovery
+    /// status without inventing a relay frame or acknowledgement.
+    ///
+    /// The registered body verifier and endpoint predecessor checks are the
+    /// same ones used by [`Self::receive_recovered_receipt`]. A refusal leaves
+    /// the restored payload checkpoint live for a later authenticated retry.
+    pub fn authenticate_recovered_receipt_object(
+        &mut self,
+        object: super::CredentialV2Object,
+    ) -> Result<CredentialV2ClaimantRecoveredReceipt, CredentialV2Error> {
+        if self.persistence_gate.is_some()
+            || self.phase != ClaimantPhase::Established
+            || self.endpoint_phase()? != CredentialV2Phase::PayloadSent
+            || self.pending_recovered_receipt
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        let authority = self
+            .endpoint
+            .as_mut()
+            .ok_or(CredentialV2Error::Phase)?
+            .authenticate_recovered_receipt(&object)?;
+        self.pending_recovered_receipt = true;
+        Ok(CredentialV2ClaimantRecoveredReceipt {
+            object,
+            authority,
+            peer_seq: None,
+        })
+    }
+
     /// Consume one authenticated Receipt only after the wallet's installed
     /// state is durable, then release the exact relay acknowledgement.
     pub fn commit_recovered_receipt(
@@ -590,20 +620,24 @@ impl CredentialV2ClaimantSession {
             || self.persistence_gate.is_some()
             || self.phase != ClaimantPhase::Established
             || self.endpoint_phase()? != CredentialV2Phase::PayloadSent
-            || self.has_cached_outbound_frame()
+            || (receipt.peer_seq.is_some() && self.has_cached_outbound_frame())
         {
             return Err(CredentialV2Error::Phase);
         }
-        let acknowledgement = relay_message(ClientMessage::Ack {
-            peer_seq: receipt.peer_seq,
-        })?;
+        let acknowledgement = receipt
+            .peer_seq
+            .map(|peer_seq| relay_message(ClientMessage::Ack { peer_seq }))
+            .transpose()?;
         self.endpoint
             .as_mut()
             .ok_or(CredentialV2Error::Phase)?
             .recover_receipt(&receipt.object, receipt.authority)?;
         self.pending_recovered_receipt = false;
         self.terminate();
-        Ok(vec![CredentialV2ClaimantEffect::Send(acknowledgement)])
+        Ok(acknowledgement
+            .map(CredentialV2ClaimantEffect::Send)
+            .into_iter()
+            .collect())
     }
 
     /// Report whether a verified Receipt is waiting on the consumer's durable
