@@ -82,6 +82,10 @@ fn sent(effects: &[CredentialV2AllocatorEffect]) -> Vec<ClientMessage> {
 fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame() {
     let mut allocator = CredentialV2AllocatorSession::new(input(), Box::new(AcceptBodies)).unwrap();
     assert_eq!(
+        allocator.receipt_recovery_commitment().unwrap_err(),
+        CredentialV2Error::Phase,
+    );
+    assert_eq!(
         decode_client_message(&allocator.start().unwrap()).unwrap(),
         ClientMessage::Bind,
     );
@@ -235,6 +239,12 @@ fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame()
         sent(&established)[0],
         ClientMessage::Ack { peer_seq: 1 }
     ));
+    let receipt_recovery_commitment = allocator.receipt_recovery_commitment().unwrap();
+    assert_ne!(receipt_recovery_commitment, [0_u8; 32]);
+    assert_eq!(
+        allocator.receipt_recovery_commitment().unwrap(),
+        receipt_recovery_commitment,
+    );
 
     let intent_digest = [0x51; 32];
     let offer = CredentialV2Object::new(CredentialV2Kind::Offer, intent_digest, vec![0xa0])

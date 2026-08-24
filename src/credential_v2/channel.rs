@@ -11,12 +11,16 @@ use aes_gcm::{
 use ciborium::Value;
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
-use sha2::{Digest, Sha512};
+use sha2::{Digest, Sha256, Sha512};
 use std::fmt;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 const MAX_PLAINTEXT: usize = 69_556;
+const RECEIPT_RECOVERY_TOKEN_DOMAIN: &[u8] =
+    b"selfsame credential/v2 receipt recovery token v1\0";
+const RECEIPT_RECOVERY_COMMITMENT_DOMAIN: &[u8] =
+    b"selfsame credential/v2 receipt recovery commitment v1\0";
 
 /// Derived credential/v2 channel awaiting the peer's Finished value.
 pub struct PendingCredentialV2Channel {
@@ -319,6 +323,33 @@ impl SecureCredentialV2Channel {
         &self.exporter
     }
 
+    /// Derive the Selfsame receipt-recovery token without releasing it across
+    /// an adapter boundary. The exporter and transcript are both sealed inside
+    /// every endpoint checkpoint, so restoration reproduces the exact token.
+    pub(super) fn receipt_recovery_token(
+        &self,
+    ) -> Result<Zeroizing<[u8; 32]>, CredentialV2Error> {
+        let mut mac = Hmac::<Sha256>::new_from_slice(self.exporter.as_slice())
+            .map_err(|_| CredentialV2Error::KeySchedule)?;
+        mac.update(RECEIPT_RECOVERY_TOKEN_DOMAIN);
+        mac.update(&self.transcript_hash);
+        Ok(Zeroizing::new(mac.finalize().into_bytes().into()))
+    }
+
+    /// Return the public commitment bound to this channel's carrier.
+    pub(super) fn receipt_recovery_commitment(
+        &self,
+        carrier: &super::CredentialV2Carrier,
+    ) -> Result<[u8; 32], CredentialV2Error> {
+        let token = self.receipt_recovery_token()?;
+        let mut digest = Sha256::new();
+        digest.update(RECEIPT_RECOVERY_COMMITMENT_DOMAIN);
+        digest.update(token.as_slice());
+        digest.update(carrier.carrier_ceremony_id());
+        digest.update(carrier.application_context().as_bytes());
+        Ok(digest.finalize().into())
+    }
+
     fn fail<T>(&mut self, error: CredentialV2Error) -> Result<T, CredentialV2Error> {
         self.terminal = true;
         Err(error)
@@ -475,6 +506,8 @@ mod independent_tests {
             "allocator_frame": hex::encode(&allocator_frame_bytes),
             "claimant_frame": hex::encode(&claimant_frame_bytes),
             "plaintext": hex::encode(plaintext),
+            "application_context": hex::encode(carrier.application_context().as_bytes()),
+            "carrier_ceremony_id": hex::encode(carrier.carrier_ceremony_id()),
         });
         let script = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -593,7 +626,19 @@ mod independent_tests {
         let finished_allocator = pending_allocator.local_finished_frame();
         let finished_claimant = pending_claimant.local_finished_frame();
         let mut allocator_channel = pending_allocator.confirm(&finished_claimant).unwrap();
-        let _claimant_channel = pending_claimant.confirm(&finished_allocator).unwrap();
+        let claimant_channel = pending_claimant.confirm(&finished_allocator).unwrap();
+        assert_eq!(
+            allocator_channel.receipt_recovery_token().unwrap().as_slice(),
+            oracle_bytes(&oracle, "receipt_recovery_token")
+        );
+        assert_eq!(
+            allocator_channel.receipt_recovery_commitment(&carrier).unwrap(),
+            oracle_bytes(&oracle, "receipt_recovery_commitment").as_slice()
+        );
+        assert_eq!(
+            claimant_channel.receipt_recovery_commitment(&carrier).unwrap(),
+            allocator_channel.receipt_recovery_commitment(&carrier).unwrap()
+        );
         let aad = sealed_aad(
             Direction::AllocatorToClaimant,
             0,

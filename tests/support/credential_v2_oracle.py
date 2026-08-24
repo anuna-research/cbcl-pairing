@@ -129,6 +129,17 @@ def main() -> None:
         b"pairing-credential-v2 finished B" + th,
         hashlib.sha512,
     ).digest()
+    outputs["receipt_recovery_token"] = hmac.new(
+        outputs["exporter"],
+        b"selfsame credential/v2 receipt recovery token v1\x00" + th,
+        hashlib.sha256,
+    ).digest()
+    outputs["receipt_recovery_commitment"] = hashlib.sha256(
+        b"selfsame credential/v2 receipt recovery commitment v1\x00"
+        + outputs["receipt_recovery_token"]
+        + inputs["carrier_ceremony_id"]
+        + inputs["application_context"]
+    ).digest()
     aad = cbor_map(
         [
             (cbor_text("v"), cbor_uint(2)),

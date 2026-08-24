@@ -177,6 +177,20 @@ impl CredentialV2AllocatorSession {
         relay_message(ClientMessage::Bind)
     }
 
+    /// Return the public Selfsame receipt-recovery commitment after both
+    /// Finished values are verified.
+    ///
+    /// The HMAC token and exporter remain inside Rust and the sealed endpoint
+    /// checkpoint. Only this SHA-256 commitment may cross into browser script.
+    pub fn receipt_recovery_commitment(&self) -> Result<[u8; 32], CredentialV2Error> {
+        match &self.state {
+            AllocatorState::Established { endpoint, channel, .. } => {
+                channel.receipt_recovery_commitment(&endpoint.carrier)
+            }
+            _ => Err(CredentialV2Error::Phase),
+        }
+    }
+
     /// Apply one complete relay response. A checkpoint effect is always alone.
     pub fn receive(
         &mut self,
