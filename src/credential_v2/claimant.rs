@@ -337,6 +337,30 @@ impl CredentialV2ClaimantSession {
             .receipt_recovery_commitment(&endpoint.carrier)
     }
 
+    /// Use the secret receipt-recovery token only while a restored or live
+    /// claimant is durably waiting for its terminal Receipt.
+    ///
+    /// The token is derived into zeroizing storage and borrowed only for the
+    /// duration of `consumer`. This deliberately has no WASM binding: a native
+    /// protocol shell may encode the closed HTTPS recovery request, while
+    /// browser script can obtain only [`Self::receipt_recovery_commitment`].
+    pub fn with_receipt_recovery_token<T>(
+        &self,
+        consumer: impl FnOnce(&[u8; 32]) -> T,
+    ) -> Result<T, CredentialV2Error> {
+        if self.phase != ClaimantPhase::Established
+            || self.endpoint_phase()? != CredentialV2Phase::PayloadSent
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        let token = self
+            .channel
+            .as_ref()
+            .ok_or(CredentialV2Error::Phase)?
+            .receipt_recovery_token()?;
+        Ok(consumer(&token))
+    }
+
     /// Report the sole post-Finished point where the consumer may commit a
     /// newly approved exact-pair policy row.
     #[must_use]

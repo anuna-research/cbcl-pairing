@@ -516,6 +516,21 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
         Box::new(AcceptBodies),
     )
     .unwrap();
+    let recovered_commitment = recovered
+        .with_receipt_recovery_token(|token| {
+            let mut digest = sha2::Sha256::new();
+            digest.update(b"selfsame credential/v2 receipt recovery commitment v1\0");
+            digest.update(token);
+            digest.update(recognised_carrier.carrier_ceremony_id());
+            digest.update(recognised_carrier.application_context().as_bytes());
+            <[u8; 32]>::from(digest.finalize())
+        })
+        .unwrap();
+    assert_eq!(
+        recovered_commitment,
+        recovered.receipt_recovery_commitment().unwrap(),
+        "a restored payload checkpoint must reproduce the exact secret token without exposing it through a browser adapter",
+    );
     let recovered_commands = sent(&recovered.resume_cached_frame().unwrap());
     assert!(matches!(
         recovered_commands.as_slice(),
