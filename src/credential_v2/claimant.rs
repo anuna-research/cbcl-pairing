@@ -324,6 +324,19 @@ impl CredentialV2ClaimantSession {
             .is_some()
     }
 
+    /// Return the public receipt-recovery commitment from the claimant's
+    /// established channel. The recovery token itself never leaves the core.
+    pub fn receipt_recovery_commitment(&self) -> Result<[u8; 32], CredentialV2Error> {
+        if self.phase != ClaimantPhase::Established {
+            return Err(CredentialV2Error::Phase);
+        }
+        let endpoint = self.endpoint.as_ref().ok_or(CredentialV2Error::Phase)?;
+        self.channel
+            .as_ref()
+            .ok_or(CredentialV2Error::Phase)?
+            .receipt_recovery_commitment(&endpoint.carrier)
+    }
+
     /// Report the sole post-Finished point where the consumer may commit a
     /// newly approved exact-pair policy row.
     #[must_use]

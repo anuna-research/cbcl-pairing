@@ -310,6 +310,12 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
     claimant
         .authorise_authenticated_profile(Box::new(TestOfferVerifier))
         .unwrap();
+    let receipt_recovery_commitment = claimant.receipt_recovery_commitment().unwrap();
+    assert_ne!(receipt_recovery_commitment, [0_u8; 32]);
+    assert_eq!(
+        claimant.receipt_recovery_commitment().unwrap(),
+        receipt_recovery_commitment
+    );
     assert!(matches!(
         claimant.authorise_authenticated_profile(Box::new(TestOfferVerifier)),
         Err(CredentialV2Error::Phase)
