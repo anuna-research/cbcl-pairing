@@ -65,6 +65,18 @@ jobs:
       - name: Run ${{ matrix.gate }} gate
         run: |
           case "${{ matrix.gate }}" in
+            test-core|test-independent)
+              if ! command -v python3 >/dev/null 2>&1 || \
+                ! python3 -c 'import cryptography' >/dev/null 2>&1; then
+                SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+                $SUDO apt-get update
+                $SUDO apt-get install -y python3 python3-cryptography
+              fi
+              python3 --version
+              python3 -c 'import cryptography; print(cryptography.__version__)'
+              ;;
+          esac
+          case "${{ matrix.gate }}" in
             static)
               cargo fmt --check
               cargo clippy --all-targets --all-features -- -D warnings
@@ -83,14 +95,6 @@ jobs:
               done
               ;;
             test-independent)
-              if ! command -v python3 >/dev/null 2>&1 || \
-                ! python3 -c 'import cryptography' >/dev/null 2>&1; then
-                SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
-                $SUDO apt-get update
-                $SUDO apt-get install -y python3 python3-cryptography
-              fi
-              python3 --version
-              python3 -c 'import cryptography; print(cryptography.__version__)'
               cargo test --all-features --test independent_endpoint
               ;;
             test-relay-process)
