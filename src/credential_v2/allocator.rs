@@ -413,18 +413,32 @@ impl CredentialV2AllocatorSession {
 
     fn reopen_effects(&self) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
         let (carrier, relay, cached) = match &self.state {
-            AllocatorState::Bootstrap(bootstrap) => (
-                bootstrap.carrier(),
-                bootstrap.relay_state(),
-                bootstrap.cached_outbound_frame(),
-            ),
+            AllocatorState::Bootstrap(bootstrap) => {
+                let relay = bootstrap.relay_state();
+                let cached = bootstrap
+                    .cached_outbound_frame()
+                    .map(|frame| {
+                        relay
+                            .cached_bootstrap_sequence()
+                            .map(|sequence| (frame, sequence))
+                    })
+                    .transpose()?;
+                (bootstrap.carrier(), relay, cached)
+            }
             AllocatorState::Established {
                 endpoint, relay, ..
-            } => (
-                &endpoint.carrier,
-                relay.as_ref(),
-                relay.cached_outbound_frame(),
-            ),
+            } => {
+                let relay = relay.as_ref();
+                let cached = relay
+                    .cached_outbound_frame()
+                    .map(|frame| {
+                        relay
+                            .cached_application_sequence()
+                            .map(|sequence| (frame, sequence))
+                    })
+                    .transpose()?;
+                (&endpoint.carrier, relay, cached)
+            }
             _ => return Err(CredentialV2Error::Phase),
         };
         let mut effects = vec![CredentialV2AllocatorEffect::Send(relay_message(
@@ -433,10 +447,10 @@ impl CredentialV2AllocatorSession {
                 membership_token: *relay.membership_token(),
             },
         )?)];
-        if let Some(frame) = cached {
+        if let Some((frame, sequence)) = cached {
             effects.push(CredentialV2AllocatorEffect::Send(relay_message(
                 ClientMessage::Put {
-                    seq: relay.cached_application_sequence()?,
+                    seq: sequence,
                     body: super::encode_frame(frame)?,
                 },
             )?));

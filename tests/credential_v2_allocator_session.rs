@@ -78,6 +78,51 @@ fn sent(effects: &[CredentialV2AllocatorEffect]) -> Vec<ClientMessage> {
         .collect()
 }
 
+fn assert_restored_reopens_cached_bootstrap_frame(
+    checkpoint: &[u8],
+    carrier: &[u8],
+    generation: u64,
+    expected_sequence: u8,
+    expected_body: &[u8],
+    nonce: [u8; 12],
+) {
+    let mut restored = CredentialV2AllocatorSession::restore(
+        checkpoint,
+        &WRAPPING_KEY,
+        decode_carrier(carrier).unwrap(),
+        generation,
+        PROFILE_DIGEST,
+        NOW,
+        Box::new(AcceptBodies),
+    )
+    .unwrap();
+    assert_eq!(
+        decode_client_message(&restored.start().unwrap()).unwrap(),
+        ClientMessage::Bind,
+    );
+    let reopened = restored
+        .receive(
+            &server(ServerMessage::Welcome),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng(nonce),
+        )
+        .unwrap();
+    let commands = sent(&reopened);
+    assert!(matches!(
+        commands.first(),
+        Some(ClientMessage::Open {
+            mailbox_id: MAILBOX,
+            membership_token: MEMBERSHIP,
+        })
+    ));
+    assert!(matches!(
+        commands.get(1),
+        Some(ClientMessage::Put { seq, body })
+            if *seq == expected_sequence && body == expected_body
+    ));
+    assert_eq!(commands.len(), 2, "recovery resends only the cached frame");
+}
+
 #[test]
 fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame() {
     let mut allocator = CredentialV2AllocatorSession::new(input(), Box::new(AcceptBodies)).unwrap();
@@ -138,19 +183,24 @@ fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame()
         .unwrap();
     let claimant_share = CredentialV2Frame::cpace(&claimant_share).unwrap();
 
-    one_checkpoint(
-        allocator
-            .receive(
-                &server(ServerMessage::Frame {
-                    peer_seq: 0,
-                    body: cbcl_pairing::credential_v2::encode_frame(&claimant_share).unwrap(),
-                }),
-                NOW,
-                CredentialV2CheckpointNonce::from_csprng([0x24; 12]),
-            )
-            .unwrap(),
-        2,
-    );
+    let share_pending = allocator
+        .receive(
+            &server(ServerMessage::Frame {
+                peer_seq: 0,
+                body: cbcl_pairing::credential_v2::encode_frame(&claimant_share).unwrap(),
+            }),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x24; 12]),
+        )
+        .unwrap();
+    let [CredentialV2AllocatorEffect::Checkpoint {
+        generation: 2,
+        checkpoint: share_checkpoint,
+        carrier: share_carrier,
+    }] = share_pending.as_slice()
+    else {
+        panic!("allocator share must be withheld behind generation two")
+    };
     let share_effects = allocator.checkpoint_persisted(2).unwrap();
     let share_commands = sent(&share_effects);
     assert!(matches!(
@@ -164,18 +214,31 @@ fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame()
     else {
         panic!("allocator share is exact relay sequence zero")
     };
+    assert_restored_reopens_cached_bootstrap_frame(
+        share_checkpoint.as_bytes(),
+        share_carrier,
+        2,
+        0,
+        allocator_share,
+        [0x2a; 12],
+    );
     let allocator_share = decode_frame(allocator_share).unwrap();
 
-    one_checkpoint(
-        allocator
-            .receive(
-                &server(ServerMessage::Acknowledged { seq: 0 }),
-                NOW,
-                CredentialV2CheckpointNonce::from_csprng([0x25; 12]),
-            )
-            .unwrap(),
-        3,
-    );
+    let finished_pending = allocator
+        .receive(
+            &server(ServerMessage::Acknowledged { seq: 0 }),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x25; 12]),
+        )
+        .unwrap();
+    let [CredentialV2AllocatorEffect::Checkpoint {
+        generation: 3,
+        checkpoint: finished_checkpoint,
+        carrier: finished_carrier,
+    }] = finished_pending.as_slice()
+    else {
+        panic!("allocator Finished must be withheld behind generation three")
+    };
     let finished_effects = allocator.checkpoint_persisted(3).unwrap();
     let finished_commands = sent(&finished_effects);
     let ClientMessage::Put {
@@ -185,6 +248,14 @@ fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame()
     else {
         panic!("allocator Finished is exact relay sequence one")
     };
+    assert_restored_reopens_cached_bootstrap_frame(
+        finished_checkpoint.as_bytes(),
+        finished_carrier,
+        3,
+        1,
+        allocator_finished,
+        [0x2b; 12],
+    );
     let allocator_finished = decode_frame(allocator_finished).unwrap();
 
     let claimant_isk = cpace::finish(
