@@ -123,6 +123,43 @@ fn assert_restored_reopens_cached_bootstrap_frame(
     assert_eq!(commands.len(), 2, "recovery resends only the cached frame");
 }
 
+fn assert_restored_reopens_acknowledged_bootstrap_frame(
+    checkpoint: &[u8],
+    carrier: &[u8],
+    generation: u64,
+    nonce: [u8; 12],
+) {
+    let mut restored = CredentialV2AllocatorSession::restore(
+        checkpoint,
+        &WRAPPING_KEY,
+        decode_carrier(carrier).unwrap(),
+        generation,
+        PROFILE_DIGEST,
+        NOW,
+        Box::new(AcceptBodies),
+    )
+    .unwrap();
+    assert_eq!(
+        decode_client_message(&restored.start().unwrap()).unwrap(),
+        ClientMessage::Bind,
+    );
+    let reopened = restored
+        .receive(
+            &server(ServerMessage::Welcome),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng(nonce),
+        )
+        .unwrap();
+    let commands = sent(&reopened);
+    assert!(matches!(
+        commands.as_slice(),
+        [ClientMessage::Open {
+            mailbox_id: MAILBOX,
+            membership_token: MEMBERSHIP,
+        }]
+    ));
+}
+
 #[test]
 fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame() {
     let mut allocator = CredentialV2AllocatorSession::new(input(), Box::new(AcceptBodies)).unwrap();
@@ -274,17 +311,28 @@ fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame()
     let claimant_finished = claimant_pending.local_finished_frame();
     let mut claimant_channel = claimant_pending.confirm(&allocator_finished).unwrap();
 
-    one_checkpoint(
-        allocator
-            .receive(
-                &server(ServerMessage::Acknowledged { seq: 1 }),
-                NOW,
-                CredentialV2CheckpointNonce::from_csprng([0x26; 12]),
-            )
-            .unwrap(),
-        4,
-    );
+    let finished_acknowledged = allocator
+        .receive(
+            &server(ServerMessage::Acknowledged { seq: 1 }),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x26; 12]),
+        )
+        .unwrap();
+    let [CredentialV2AllocatorEffect::Checkpoint {
+        generation: 4,
+        checkpoint: acknowledged_checkpoint,
+        carrier: acknowledged_carrier,
+    }] = finished_acknowledged.as_slice()
+    else {
+        panic!("acknowledged allocator Finished must be sealed at generation four")
+    };
     assert!(allocator.checkpoint_persisted(4).unwrap().is_empty());
+    assert_restored_reopens_acknowledged_bootstrap_frame(
+        acknowledged_checkpoint.as_bytes(),
+        acknowledged_carrier,
+        4,
+        [0x2c; 12],
+    );
 
     one_checkpoint(
         allocator

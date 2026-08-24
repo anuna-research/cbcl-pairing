@@ -128,12 +128,16 @@ impl CredentialV2RelayState {
             .ok_or(CredentialV2Error::Counter)
     }
 
-    pub(super) fn cached_bootstrap_sequence(&self) -> Result<u8, CredentialV2Error> {
-        if !self.awaiting_ack || self.cached_outbound.is_some() {
+    pub(super) fn cached_bootstrap_sequence(&self) -> Result<Option<u8>, CredentialV2Error> {
+        if self.cached_outbound.is_some() {
             return Err(CredentialV2Error::Phase);
+        }
+        if !self.awaiting_ack {
+            return Ok(None);
         }
         self.next_local_sequence
             .checked_sub(1)
+            .map(Some)
             .ok_or(CredentialV2Error::Counter)
     }
 

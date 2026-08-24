@@ -415,14 +415,12 @@ impl CredentialV2AllocatorSession {
         let (carrier, relay, cached) = match &self.state {
             AllocatorState::Bootstrap(bootstrap) => {
                 let relay = bootstrap.relay_state();
-                let cached = bootstrap
-                    .cached_outbound_frame()
-                    .map(|frame| {
-                        relay
-                            .cached_bootstrap_sequence()
-                            .map(|sequence| (frame, sequence))
-                    })
-                    .transpose()?;
+                let cached = match bootstrap.cached_outbound_frame() {
+                    Some(frame) => relay
+                        .cached_bootstrap_sequence()?
+                        .map(|sequence| (frame, sequence)),
+                    None => None,
+                };
                 (bootstrap.carrier(), relay, cached)
             }
             AllocatorState::Established {
