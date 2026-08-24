@@ -133,7 +133,7 @@ pub struct CredentialV2ClaimantSession {
     channel: Option<Box<SecureCredentialV2Channel>>,
     body_verifier: Option<Box<dyn CredentialV2BodyVerifier>>,
     offer_verifier: Option<Box<dyn CredentialV2ClaimantOfferVerifier>>,
-    authenticated_offer_body: Option<Vec<u8>>,
+    authenticated_offer: Option<super::CredentialV2Object>,
     persistence_gate: Option<u64>,
     after_persist: Vec<CredentialV2ClaimantEffect>,
 }
@@ -167,7 +167,7 @@ impl CredentialV2ClaimantSession {
             channel: None,
             body_verifier: Some(body_verifier),
             offer_verifier: None,
-            authenticated_offer_body: None,
+            authenticated_offer: None,
             persistence_gate: None,
             after_persist: Vec::new(),
         })
@@ -216,7 +216,7 @@ impl CredentialV2ClaimantSession {
             channel: Some(Box::new(channel)),
             body_verifier: None,
             offer_verifier: None,
-            authenticated_offer_body: None,
+            authenticated_offer: None,
             persistence_gate: None,
             after_persist: Vec::new(),
         })
@@ -272,7 +272,16 @@ impl CredentialV2ClaimantSession {
     /// Borrow the exact signed-offer body only after authenticated display.
     #[must_use]
     pub fn authenticated_offer_body(&self) -> Option<&[u8]> {
-        self.authenticated_offer_body.as_deref()
+        self.authenticated_offer
+            .as_ref()
+            .map(|object| object.body())
+    }
+
+    /// Borrow the complete authenticated Offer object for exact successor
+    /// construction after the person sees its typed display.
+    #[must_use]
+    pub const fn authenticated_offer(&self) -> Option<&super::CredentialV2Object> {
+        self.authenticated_offer.as_ref()
     }
 
     /// Report the sole post-Finished point where the consumer may commit a
@@ -761,7 +770,7 @@ impl CredentialV2ClaimantSession {
         )?)];
         match advance {
             CredentialV2Advance::DisplayIntent(display) => {
-                self.authenticated_offer_body = Some(object.body().to_vec());
+                self.authenticated_offer = Some(object);
                 effects.push(CredentialV2ClaimantEffect::DisplayIntent(display));
             }
             CredentialV2Advance::Advanced => {
@@ -792,7 +801,7 @@ impl CredentialV2ClaimantSession {
         self.endpoint = None;
         self.channel = None;
         self.relay = None;
-        self.authenticated_offer_body = None;
+        self.authenticated_offer = None;
         self.persistence_gate = None;
         self.after_persist.clear();
     }
