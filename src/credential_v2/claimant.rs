@@ -284,6 +284,16 @@ impl CredentialV2ClaimantSession {
         self.authenticated_offer.as_ref()
     }
 
+    /// Report whether one exact application frame is still awaiting its relay
+    /// acknowledgement. This exposes no frame or bearer bytes.
+    #[must_use]
+    pub fn has_cached_outbound_frame(&self) -> bool {
+        self.relay
+            .as_ref()
+            .and_then(CredentialV2RelayState::cached_outbound_frame)
+            .is_some()
+    }
+
     /// Report the sole post-Finished point where the consumer may commit a
     /// newly approved exact-pair policy row.
     #[must_use]
