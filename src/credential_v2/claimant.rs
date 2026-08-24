@@ -187,7 +187,7 @@ impl CredentialV2ClaimantSession {
         input: &[u8],
         now: u64,
     ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
-        if self.persistence_gate.is_some() {
+        if self.persistence_gate.is_some() || self.has_durable_endpoint_phase() {
             return Err(CredentialV2Error::Phase);
         }
         if self.phase == ClaimantPhase::Terminal {
@@ -328,6 +328,129 @@ impl CredentialV2ClaimantSession {
         }
         self.persistence_gate = None;
         Ok(std::mem::take(&mut self.after_persist))
+    }
+
+    /// Apply an acknowledgement after final approval and checkpoint the
+    /// updated cached-frame projection before exposing another effect.
+    pub fn receive_durable(
+        &mut self,
+        input: &[u8],
+        now: u64,
+        wrapping_key: &[u8; 32],
+        nonce: CredentialV2CheckpointNonce,
+    ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
+        if self.persistence_gate.is_some()
+            || self.phase != ClaimantPhase::Established
+            || !self.has_durable_endpoint_phase()
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        let endpoint_phase = self.endpoint_phase()?;
+        if endpoint_phase == CredentialV2Phase::FinalApproved
+            && now >= self.carrier.relay_expires_at()
+        {
+            return Err(CredentialV2Error::Expired);
+        }
+        let ServerMessage::Acknowledged { seq } =
+            decode_server_message(input).map_err(|_| CredentialV2Error::Schema)?
+        else {
+            return Err(CredentialV2Error::Phase);
+        };
+        self.local_ack(seq)?;
+        let expiry = match endpoint_phase {
+            CredentialV2Phase::FinalApproved => Some(self.carrier.relay_expires_at()),
+            CredentialV2Phase::PayloadSent => None,
+            _ => return Err(CredentialV2Error::Phase),
+        };
+        self.checkpoint_current(wrapping_key, nonce, now, expiry, Vec::new())
+    }
+
+    /// Seal and retain the reverse payload under a null-expiry checkpoint
+    /// before releasing its exact cached frame.
+    pub fn prepare_payload(
+        &mut self,
+        object: &super::CredentialV2Object,
+        wrapping_key: &[u8; 32],
+        nonce: CredentialV2CheckpointNonce,
+        now: u64,
+    ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
+        if self.persistence_gate.is_some()
+            || !self.after_persist.is_empty()
+            || self.phase != ClaimantPhase::Established
+            || self.endpoint_phase()? != CredentialV2Phase::FinalApproved
+            || object.kind() != CredentialV2Kind::Payload
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        if now >= self.carrier.relay_expires_at() {
+            return Err(CredentialV2Error::Expired);
+        }
+        let result = (|| {
+            let endpoint = self.endpoint.as_mut().ok_or(CredentialV2Error::Phase)?;
+            let channel = self.channel.as_mut().ok_or(CredentialV2Error::Phase)?;
+            let relay = self.relay.as_mut().ok_or(CredentialV2Error::Phase)?;
+            let frame = endpoint.prepare_outbound(object, channel, relay)?;
+            let sequence = relay.cached_application_sequence()?;
+            let after = vec![CredentialV2ClaimantEffect::Send(relay_message(
+                ClientMessage::Put {
+                    seq: sequence,
+                    body: encode_frame(&frame)?,
+                },
+            )?)];
+            self.checkpoint_current(wrapping_key, nonce, now, None, after)
+        })();
+        if result.is_err() {
+            self.terminate();
+        }
+        result
+    }
+
+    fn checkpoint_current(
+        &mut self,
+        wrapping_key: &[u8; 32],
+        nonce: CredentialV2CheckpointNonce,
+        now: u64,
+        expiry: Option<u64>,
+        after: Vec<CredentialV2ClaimantEffect>,
+    ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
+        if self.persistence_gate.is_some() || !self.after_persist.is_empty() {
+            return Err(CredentialV2Error::Phase);
+        }
+        let endpoint = self.endpoint.as_mut().ok_or(CredentialV2Error::Phase)?;
+        let channel = self.channel.as_ref().ok_or(CredentialV2Error::Phase)?;
+        let relay = self.relay.as_ref().ok_or(CredentialV2Error::Phase)?;
+        let generation = endpoint.checkpoint_generation.saturating_add(1);
+        let checkpoint = endpoint.seal_checkpoint(
+            channel,
+            relay,
+            wrapping_key,
+            generation,
+            expiry,
+            nonce,
+            now,
+        )?;
+        self.persistence_gate = Some(generation);
+        self.after_persist = after;
+        Ok(vec![CredentialV2ClaimantEffect::Checkpoint {
+            generation,
+            checkpoint,
+        }])
+    }
+
+    fn endpoint_phase(&self) -> Result<CredentialV2Phase, CredentialV2Error> {
+        self.endpoint
+            .as_ref()
+            .map(|endpoint| endpoint.phase())
+            .ok_or(CredentialV2Error::Phase)
+    }
+
+    fn has_durable_endpoint_phase(&self) -> bool {
+        self.endpoint.as_ref().is_some_and(|endpoint| {
+            matches!(
+                endpoint.phase(),
+                CredentialV2Phase::FinalApproved | CredentialV2Phase::PayloadSent
+            )
+        })
     }
 
     fn apply_server(

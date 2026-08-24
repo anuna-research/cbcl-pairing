@@ -422,4 +422,68 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
         claimant.checkpoint_persisted(1),
         Err(CredentialV2Error::Counter)
     ));
+
+    assert!(claimant
+        .receive(&server(ServerMessage::Acknowledged { seq: 4 }), NOW)
+        .is_err());
+    let ack_checkpoint = claimant
+        .receive_durable(
+            &server(ServerMessage::Acknowledged { seq: 4 }),
+            NOW,
+            &wrapping_key,
+            CredentialV2CheckpointNonce::from_csprng([0x7a; 12]),
+        )
+        .unwrap();
+    assert!(matches!(
+        ack_checkpoint.as_slice(),
+        [CredentialV2ClaimantEffect::Checkpoint { generation: 2, .. }]
+    ));
+    assert!(claimant.checkpoint_persisted(2).unwrap().is_empty());
+
+    let payload = successor(CredentialV2Kind::Payload, &final_approve);
+    let payload_checkpoint = claimant
+        .prepare_payload(
+            &payload,
+            &wrapping_key,
+            CredentialV2CheckpointNonce::from_csprng([0x7b; 12]),
+            NOW,
+        )
+        .unwrap();
+    let [CredentialV2ClaimantEffect::Checkpoint {
+        generation: 3,
+        checkpoint,
+    }] = payload_checkpoint.as_slice()
+    else {
+        panic!("payload send must first expose its null-expiry checkpoint")
+    };
+    let restored = CredentialV2Endpoint::restore_checkpoint(
+        checkpoint.as_bytes(),
+        &wrapping_key,
+        Side::Claimant,
+        &recognised_carrier,
+        3,
+        EXPIRY + 1,
+        Box::new(AcceptBodies),
+    )
+    .unwrap();
+    assert_eq!(
+        restored.into_parts().0.phase(),
+        CredentialV2Phase::PayloadSent
+    );
+
+    let payload_release = claimant.checkpoint_persisted(3).unwrap();
+    let payload_commands = sent(&payload_release);
+    let [ClientMessage::Put {
+        seq: 5,
+        body: sealed_payload,
+    }] = payload_commands.as_slice()
+    else {
+        panic!("only the retained payload checkpoint may release payload")
+    };
+    assert_eq!(
+        allocator_channel
+            .open(&decode_frame(sealed_payload).unwrap())
+            .unwrap(),
+        payload.as_bytes()
+    );
 }
