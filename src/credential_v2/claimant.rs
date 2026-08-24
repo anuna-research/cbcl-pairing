@@ -1,9 +1,9 @@
 use super::{
     decode_frame, decode_object, encode_frame, CredentialV2Advance, CredentialV2BodyVerifier,
-    CredentialV2Carrier, CredentialV2Context, CredentialV2Endpoint, CredentialV2Error,
-    CredentialV2Frame, CredentialV2Kind, CredentialV2Phase, CredentialV2Presence,
-    CredentialV2PresenceCode, CredentialV2RelayState, PendingCredentialV2Channel,
-    SecureCredentialV2Channel,
+    CredentialV2Carrier, CredentialV2CheckpointNonce, CredentialV2Context, CredentialV2Endpoint,
+    CredentialV2Error, CredentialV2Frame, CredentialV2Kind, CredentialV2Phase,
+    CredentialV2Presence, CredentialV2PresenceCode, CredentialV2RelayState, EndpointCheckpointV2,
+    PendingCredentialV2Channel, SecureCredentialV2Channel,
 };
 use crate::{
     cpace,
@@ -47,6 +47,13 @@ pub trait CredentialV2ClaimantOfferVerifier: fmt::Debug + Send {
 pub enum CredentialV2ClaimantEffect {
     /// Send one canonical client-to-relay message.
     Send(Vec<u8>),
+    /// Durably replace the pending claimant checkpoint before any later effect.
+    Checkpoint {
+        /// Exact monotonically increasing checkpoint generation.
+        generation: u64,
+        /// Opaque sealed endpoint checkpoint.
+        checkpoint: EndpointCheckpointV2,
+    },
     /// CPace and both Finished values established one peer-bound channel.
     ///
     /// The shell must commit or confirm exact-pair policy and then call
@@ -71,6 +78,14 @@ impl fmt::Debug for CredentialV2ClaimantEffect {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Send(bytes) => formatter.debug_tuple("Send").field(&bytes.len()).finish(),
+            Self::Checkpoint {
+                generation,
+                checkpoint,
+            } => formatter
+                .debug_struct("Checkpoint")
+                .field("generation", generation)
+                .field("checkpoint_bytes", &checkpoint.as_bytes().len())
+                .finish(),
             Self::Established { transcript_hash } => formatter
                 .debug_struct("Established")
                 .field("transcript_hash", &transcript_hash.as_slice())
@@ -119,6 +134,8 @@ pub struct CredentialV2ClaimantSession {
     body_verifier: Option<Box<dyn CredentialV2BodyVerifier>>,
     offer_verifier: Option<Box<dyn CredentialV2ClaimantOfferVerifier>>,
     authenticated_offer_body: Option<Vec<u8>>,
+    persistence_gate: Option<u64>,
+    after_persist: Vec<CredentialV2ClaimantEffect>,
 }
 
 impl fmt::Debug for CredentialV2ClaimantSession {
@@ -151,6 +168,8 @@ impl CredentialV2ClaimantSession {
             body_verifier: Some(body_verifier),
             offer_verifier: None,
             authenticated_offer_body: None,
+            persistence_gate: None,
+            after_persist: Vec::new(),
         })
     }
 
@@ -168,6 +187,9 @@ impl CredentialV2ClaimantSession {
         input: &[u8],
         now: u64,
     ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
+        if self.persistence_gate.is_some() {
+            return Err(CredentialV2Error::Phase);
+        }
         if self.phase == ClaimantPhase::Terminal {
             return Err(CredentialV2Error::Terminal);
         }
@@ -220,7 +242,8 @@ impl CredentialV2ClaimantSession {
         &mut self,
         object: &super::CredentialV2Object,
     ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
-        if self.phase != ClaimantPhase::Established
+        if self.persistence_gate.is_some()
+            || self.phase != ClaimantPhase::Established
             || !matches!(
                 object.kind(),
                 CredentialV2Kind::IntentApprove
@@ -243,6 +266,68 @@ impl CredentialV2ClaimantSession {
                 body: encode_frame(&frame)?,
             },
         )?)])
+    }
+
+    /// Advance through final approval, then expose only the checkpoint that
+    /// must join the consumer's sealed pending slot before frame release.
+    pub fn prepare_final_approval(
+        &mut self,
+        object: &super::CredentialV2Object,
+        wrapping_key: &[u8; 32],
+        nonce: CredentialV2CheckpointNonce,
+        now: u64,
+    ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
+        if self.persistence_gate.is_some()
+            || !self.after_persist.is_empty()
+            || self.phase != ClaimantPhase::Established
+            || object.kind() != CredentialV2Kind::FinalApprove
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        let result = (|| {
+            let endpoint = self.endpoint.as_mut().ok_or(CredentialV2Error::Phase)?;
+            let channel = self.channel.as_mut().ok_or(CredentialV2Error::Phase)?;
+            let relay = self.relay.as_mut().ok_or(CredentialV2Error::Phase)?;
+            let frame = endpoint.prepare_outbound(object, channel, relay)?;
+            let sequence = relay.cached_application_sequence()?;
+            let generation = endpoint.checkpoint_generation.saturating_add(1);
+            let checkpoint = endpoint.seal_checkpoint(
+                channel,
+                relay,
+                wrapping_key,
+                generation,
+                Some(self.carrier.relay_expires_at()),
+                nonce,
+                now,
+            )?;
+            self.persistence_gate = Some(generation);
+            self.after_persist = vec![CredentialV2ClaimantEffect::Send(relay_message(
+                ClientMessage::Put {
+                    seq: sequence,
+                    body: encode_frame(&frame)?,
+                },
+            )?)];
+            Ok(vec![CredentialV2ClaimantEffect::Checkpoint {
+                generation,
+                checkpoint,
+            }])
+        })();
+        if result.is_err() {
+            self.terminate();
+        }
+        result
+    }
+
+    /// Confirm atomic pending-slot storage and release only its covered frame.
+    pub fn checkpoint_persisted(
+        &mut self,
+        generation: u64,
+    ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
+        if self.persistence_gate != Some(generation) {
+            return Err(CredentialV2Error::Counter);
+        }
+        self.persistence_gate = None;
+        Ok(std::mem::take(&mut self.after_persist))
     }
 
     fn apply_server(
@@ -512,6 +597,8 @@ impl CredentialV2ClaimantSession {
         self.channel = None;
         self.relay = None;
         self.authenticated_offer_body = None;
+        self.persistence_gate = None;
+        self.after_persist.clear();
     }
 }
 

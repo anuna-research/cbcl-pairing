@@ -5,13 +5,14 @@ use cbcl_pairing::{
     credential_v2::{
         credential_v2_intent_digest, decode_frame, encode_frame, CredentialV2AccountProvenance,
         CredentialV2Advance, CredentialV2BodyVerifier, CredentialV2Carrier,
-        CredentialV2CarrierInput, CredentialV2ClaimantEffect, CredentialV2ClaimantOfferVerifier,
-        CredentialV2ClaimantSession, CredentialV2ClaimantSessionInput, CredentialV2Context,
-        CredentialV2DeviceBinding, CredentialV2Endpoint, CredentialV2Error, CredentialV2Frame,
-        CredentialV2IntentAuthority, CredentialV2IntentClaims, CredentialV2IntentInput,
-        CredentialV2IntentVerifier, CredentialV2Kind, CredentialV2LogicalBody, CredentialV2Object,
-        CredentialV2OfferParser, CredentialV2Presence, CredentialV2PresenceCode,
-        CredentialV2TofuState, CredentialV2Transition, PendingCredentialV2Channel,
+        CredentialV2CarrierInput, CredentialV2CheckpointNonce, CredentialV2ClaimantEffect,
+        CredentialV2ClaimantOfferVerifier, CredentialV2ClaimantSession,
+        CredentialV2ClaimantSessionInput, CredentialV2Context, CredentialV2DeviceBinding,
+        CredentialV2Endpoint, CredentialV2Error, CredentialV2Frame, CredentialV2IntentAuthority,
+        CredentialV2IntentClaims, CredentialV2IntentInput, CredentialV2IntentVerifier,
+        CredentialV2Kind, CredentialV2LogicalBody, CredentialV2Object, CredentialV2OfferParser,
+        CredentialV2Phase, CredentialV2Presence, CredentialV2PresenceCode, CredentialV2TofuState,
+        CredentialV2Transition, PendingCredentialV2Channel,
     },
     wire::{
         claim_commitment, decode_client_message, encode_server_message, ClaimToken, ClientMessage,
@@ -365,5 +366,60 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
     assert!(matches!(
         claimant.prepare_application_object(&final_approve),
         Err(CredentialV2Error::Phase)
+    ));
+
+    let wrapping_key = [0x78; 32];
+    let checkpoint_effects = claimant
+        .prepare_final_approval(
+            &final_approve,
+            &wrapping_key,
+            CredentialV2CheckpointNonce::from_csprng([0x79; 12]),
+            NOW,
+        )
+        .unwrap();
+    let [CredentialV2ClaimantEffect::Checkpoint {
+        generation: 1,
+        checkpoint,
+    }] = checkpoint_effects.as_slice()
+    else {
+        panic!("final approval must expose only its first durable checkpoint")
+    };
+    let restored = CredentialV2Endpoint::restore_checkpoint(
+        checkpoint.as_bytes(),
+        &wrapping_key,
+        Side::Claimant,
+        &recognised_carrier,
+        1,
+        NOW,
+        Box::new(AcceptBodies),
+    )
+    .unwrap();
+    let (restored_endpoint, _, restored_relay) = restored.into_parts();
+    assert_eq!(restored_endpoint.phase(), CredentialV2Phase::FinalApproved);
+    assert!(restored_relay.cached_outbound_frame().is_some());
+    assert!(claimant.receive(&server(ServerMessage::Pong), NOW).is_err());
+    assert!(matches!(
+        claimant.checkpoint_persisted(2),
+        Err(CredentialV2Error::Counter)
+    ));
+
+    let released = claimant.checkpoint_persisted(1).unwrap();
+    let released_commands = sent(&released);
+    let [ClientMessage::Put {
+        seq: 4,
+        body: sealed_final_approve,
+    }] = released_commands.as_slice()
+    else {
+        panic!("only durable final approval can release its exact cached frame")
+    };
+    assert_eq!(
+        allocator_channel
+            .open(&decode_frame(sealed_final_approve).unwrap())
+            .unwrap(),
+        final_approve.as_bytes()
+    );
+    assert!(matches!(
+        claimant.checkpoint_persisted(1),
+        Err(CredentialV2Error::Counter)
     ));
 }
