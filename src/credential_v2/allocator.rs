@@ -1,8 +1,9 @@
 use super::{
-    decode_frame, encode_carrier, CredentialV2AllocatorBootstrap,
+    decode_frame, decode_object, encode_carrier, CredentialV2AllocatorBootstrap,
     CredentialV2AllocatorBootstrapPhase, CredentialV2BodyVerifier, CredentialV2Carrier,
     CredentialV2CarrierInput, CredentialV2CheckpointNonce, CredentialV2Endpoint, CredentialV2Error,
-    CredentialV2Presence, CredentialV2RelayState, EndpointCheckpointV2, SecureCredentialV2Channel,
+    CredentialV2Object, CredentialV2Presence, CredentialV2RelayState, EndpointCheckpointV2,
+    SecureCredentialV2Channel,
 };
 use crate::wire::{
     claim_commitment, decode_server_message, encode_client_message, ClaimToken, ClientMessage,
@@ -60,6 +61,11 @@ pub enum CredentialV2AllocatorEffect {
         /// Exact 64-octet credential/v2 transcript hash.
         transcript_hash: [u8; 64],
     },
+    /// One authenticated peer object advanced the endpoint after durable state.
+    ReceivedObject {
+        /// Fully recognised padded object and its exact logical body.
+        object: CredentialV2Object,
+    },
     /// The relay ended before application completion.
     Terminal,
 }
@@ -86,6 +92,11 @@ impl fmt::Debug for CredentialV2AllocatorEffect {
                 .debug_struct("Established")
                 .field("transcript_hash", &transcript_hash.as_slice())
                 .finish(),
+            Self::ReceivedObject { object } => formatter
+                .debug_struct("ReceivedObject")
+                .field("kind", &object.kind())
+                .field("body_bytes", &object.body().len())
+                .finish(),
             Self::Terminal => formatter.write_str("Terminal"),
         }
     }
@@ -96,9 +107,9 @@ enum AllocatorState {
     AwaitAllocation,
     Bootstrap(Box<CredentialV2AllocatorBootstrap>),
     Established {
-        _endpoint: Box<CredentialV2Endpoint>,
-        _channel: Box<SecureCredentialV2Channel>,
-        _relay: Box<CredentialV2RelayState>,
+        endpoint: Box<CredentialV2Endpoint>,
+        channel: Box<SecureCredentialV2Channel>,
+        relay: Box<CredentialV2RelayState>,
     },
     Terminal,
 }
@@ -197,6 +208,24 @@ impl CredentialV2AllocatorSession {
         Ok(std::mem::take(&mut self.after_persist))
     }
 
+    /// Seal and durably checkpoint one application object before relay release.
+    pub fn prepare_application_object(
+        &mut self,
+        object: &CredentialV2Object,
+        now: u64,
+        checkpoint_nonce: CredentialV2CheckpointNonce,
+    ) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
+        if self.persistence_gate.is_some() {
+            return Err(CredentialV2Error::Phase);
+        }
+        let result = self.prepare_application_object_inner(object, now, checkpoint_nonce);
+        if result.is_err() {
+            self.state = AllocatorState::Terminal;
+            self.after_persist.clear();
+        }
+        result
+    }
+
     fn apply_server(
         &mut self,
         message: ServerMessage,
@@ -286,6 +315,9 @@ impl CredentialV2AllocatorSession {
         nonce: CredentialV2CheckpointNonce,
     ) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
         let frame = decode_frame(body)?;
+        if matches!(self.state, AllocatorState::Established { .. }) {
+            return self.peer_application_frame(peer_seq, frame, now, nonce);
+        }
         let phase = self.bootstrap()?.phase();
         match phase {
             CredentialV2AllocatorBootstrapPhase::Allocated => {
@@ -339,6 +371,9 @@ impl CredentialV2AllocatorSession {
         now: u64,
         nonce: CredentialV2CheckpointNonce,
     ) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
+        if matches!(self.state, AllocatorState::Established { .. }) {
+            return self.application_acknowledged(sequence, now, nonce);
+        }
         match self.bootstrap()?.phase() {
             CredentialV2AllocatorBootstrapPhase::ShareSent => {
                 let (next_sequence, finished) = {
@@ -419,9 +454,9 @@ impl CredentialV2AllocatorSession {
         let next_generation = generation.saturating_add(1);
         let carrier_bytes = encode_carrier(&carrier)?;
         self.state = AllocatorState::Established {
-            _endpoint: Box::new(endpoint),
-            _channel: Box::new(channel),
-            _relay: Box::new(relay),
+            endpoint: Box::new(endpoint),
+            channel: Box::new(channel),
+            relay: Box::new(relay),
         };
         let mut after = Vec::new();
         if let Some(ack) = ack {
@@ -429,6 +464,114 @@ impl CredentialV2AllocatorSession {
         }
         after.push(CredentialV2AllocatorEffect::Established { transcript_hash });
         self.gate(next_generation, checkpoint, carrier_bytes, after)
+    }
+
+    fn prepare_application_object_inner(
+        &mut self,
+        object: &CredentialV2Object,
+        now: u64,
+        nonce: CredentialV2CheckpointNonce,
+    ) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
+        let (sequence, frame) = match &mut self.state {
+            AllocatorState::Established {
+                endpoint,
+                channel,
+                relay,
+            } => {
+                let frame = endpoint.prepare_outbound(object, channel, relay)?;
+                let sequence = relay.cached_application_sequence()?;
+                (sequence, frame)
+            }
+            _ => return Err(CredentialV2Error::Phase),
+        };
+        self.checkpoint_established(
+            now,
+            nonce,
+            vec![CredentialV2AllocatorEffect::Send(relay_message(
+                ClientMessage::Put {
+                    seq: sequence,
+                    body: super::encode_frame(&frame)?,
+                },
+            )?)],
+        )
+    }
+
+    fn peer_application_frame(
+        &mut self,
+        peer_seq: u8,
+        frame: super::CredentialV2Frame,
+        now: u64,
+        nonce: CredentialV2CheckpointNonce,
+    ) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
+        let object = match &mut self.state {
+            AllocatorState::Established {
+                endpoint,
+                channel,
+                relay,
+            } => {
+                relay.accept_peer_sequence(peer_seq)?;
+                let plaintext = channel.open(&frame)?;
+                let object = decode_object(&plaintext)?;
+                endpoint.receive(&object)?;
+                object
+            }
+            _ => return Err(CredentialV2Error::Phase),
+        };
+        self.checkpoint_established(
+            now,
+            nonce,
+            vec![
+                CredentialV2AllocatorEffect::Send(relay_message(ClientMessage::Ack { peer_seq })?),
+                CredentialV2AllocatorEffect::ReceivedObject { object },
+            ],
+        )
+    }
+
+    fn application_acknowledged(
+        &mut self,
+        sequence: u8,
+        now: u64,
+        nonce: CredentialV2CheckpointNonce,
+    ) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
+        match &mut self.state {
+            AllocatorState::Established { relay, .. } => {
+                relay.acknowledge_application_frame(sequence)?;
+            }
+            _ => return Err(CredentialV2Error::Phase),
+        }
+        self.checkpoint_established(now, nonce, Vec::new())
+    }
+
+    fn checkpoint_established(
+        &mut self,
+        now: u64,
+        nonce: CredentialV2CheckpointNonce,
+        after: Vec<CredentialV2AllocatorEffect>,
+    ) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
+        let wrapping_key = *self.wrapping_key;
+        let (generation, checkpoint, carrier) = match &mut self.state {
+            AllocatorState::Established {
+                endpoint,
+                channel,
+                relay,
+            } => {
+                let generation = endpoint.checkpoint_generation.saturating_add(1);
+                let expiry = endpoint.carrier.relay_expires_at();
+                let checkpoint = endpoint.seal_checkpoint(
+                    channel,
+                    relay,
+                    &wrapping_key,
+                    generation,
+                    Some(expiry),
+                    nonce,
+                    now,
+                )?;
+                let carrier = encode_carrier(&endpoint.carrier)?;
+                (generation, checkpoint, carrier)
+            }
+            _ => return Err(CredentialV2Error::Phase),
+        };
+        self.gate(generation, checkpoint, carrier, after)
     }
 
     fn checkpoint_bootstrap(

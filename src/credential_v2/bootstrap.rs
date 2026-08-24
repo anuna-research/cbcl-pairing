@@ -110,8 +110,33 @@ impl CredentialV2RelayState {
         if self.awaiting_ack || !matches!(frame, CredentialV2Frame::Sealed { .. }) {
             return Err(CredentialV2Error::Phase);
         }
+        self.next_local_sequence = self
+            .next_local_sequence
+            .checked_add(1)
+            .ok_or(CredentialV2Error::Counter)?;
         self.cached_outbound = Some(frame);
         self.awaiting_ack = true;
+        Ok(())
+    }
+
+    pub(super) fn cached_application_sequence(&self) -> Result<u8, CredentialV2Error> {
+        if !self.awaiting_ack || self.cached_outbound.is_none() {
+            return Err(CredentialV2Error::Phase);
+        }
+        self.next_local_sequence
+            .checked_sub(1)
+            .ok_or(CredentialV2Error::Counter)
+    }
+
+    pub(super) fn acknowledge_application_frame(
+        &mut self,
+        sequence: u8,
+    ) -> Result<(), CredentialV2Error> {
+        if self.cached_application_sequence()? != sequence {
+            return Err(CredentialV2Error::Counter);
+        }
+        self.cached_outbound = None;
+        self.awaiting_ack = false;
         Ok(())
     }
 }

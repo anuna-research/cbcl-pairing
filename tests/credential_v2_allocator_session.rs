@@ -5,8 +5,9 @@ use cbcl_pairing::{
     credential_v2::{
         decode_carrier, decode_frame, CredentialV2AllocatorEffect, CredentialV2AllocatorSession,
         CredentialV2AllocatorSessionInput, CredentialV2BodyVerifier, CredentialV2CheckpointNonce,
-        CredentialV2Context, CredentialV2Error, CredentialV2Frame, CredentialV2LogicalBody,
-        CredentialV2Presence, PendingCredentialV2Channel,
+        CredentialV2Context, CredentialV2Error, CredentialV2Frame, CredentialV2Kind,
+        CredentialV2LogicalBody, CredentialV2Object, CredentialV2Presence,
+        PendingCredentialV2Channel,
     },
     wire::{decode_client_message, encode_server_message, ClientMessage, ServerMessage, Side},
 };
@@ -21,11 +22,11 @@ const MEMBERSHIP: [u8; 32] = [0x15; 32];
 const WRAPPING_KEY: [u8; 32] = [0x16; 32];
 
 #[derive(Debug)]
-struct RefuseBodies;
+struct AcceptBodies;
 
-impl CredentialV2BodyVerifier for RefuseBodies {
+impl CredentialV2BodyVerifier for AcceptBodies {
     fn verify(&mut self, _: &CredentialV2LogicalBody<'_>) -> Result<(), CredentialV2Error> {
-        Err(CredentialV2Error::Schema)
+        Ok(())
     }
 }
 
@@ -79,7 +80,7 @@ fn sent(effects: &[CredentialV2AllocatorEffect]) -> Vec<ClientMessage> {
 
 #[test]
 fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame() {
-    let mut allocator = CredentialV2AllocatorSession::new(input(), Box::new(RefuseBodies)).unwrap();
+    let mut allocator = CredentialV2AllocatorSession::new(input(), Box::new(AcceptBodies)).unwrap();
     assert_eq!(
         decode_client_message(&allocator.start().unwrap()).unwrap(),
         ClientMessage::Bind,
@@ -196,7 +197,7 @@ fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame()
     )
     .unwrap();
     let claimant_finished = claimant_pending.local_finished_frame();
-    claimant_pending.confirm(&allocator_finished).unwrap();
+    let mut claimant_channel = claimant_pending.confirm(&allocator_finished).unwrap();
 
     one_checkpoint(
         allocator
@@ -234,6 +235,95 @@ fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame()
         sent(&established)[0],
         ClientMessage::Ack { peer_seq: 1 }
     ));
+
+    let intent_digest = [0x51; 32];
+    let offer = CredentialV2Object::new(CredentialV2Kind::Offer, intent_digest, vec![0xa0])
+        .expect("bounded offer object");
+    one_checkpoint(
+        allocator
+            .prepare_application_object(
+                &offer,
+                NOW,
+                CredentialV2CheckpointNonce::from_csprng([0x52; 12]),
+            )
+            .unwrap(),
+        6,
+    );
+    let offer_effects = allocator.checkpoint_persisted(6).unwrap();
+    let offer_commands = sent(&offer_effects);
+    let [ClientMessage::Put {
+        seq: 2,
+        body: sealed_offer,
+    }] = offer_commands.as_slice()
+    else {
+        panic!("offer is the exact next relay frame")
+    };
+    let sealed_offer = decode_frame(sealed_offer).unwrap();
+    assert_eq!(
+        claimant_channel.open(&sealed_offer).unwrap(),
+        offer.as_bytes()
+    );
+
+    one_checkpoint(
+        allocator
+            .receive(
+                &server(ServerMessage::Acknowledged { seq: 2 }),
+                NOW,
+                CredentialV2CheckpointNonce::from_csprng([0x53; 12]),
+            )
+            .unwrap(),
+        7,
+    );
+    assert!(allocator.checkpoint_persisted(7).unwrap().is_empty());
+
+    let decision_body = cbor2::to_canonical_vec(&ciborium::Value::Map(vec![
+        (
+            ciborium::Value::Text("carrierCeremonyId".into()),
+            ciborium::Value::Bytes([0x17; 32].to_vec()),
+        ),
+        (
+            ciborium::Value::Text("decision".into()),
+            ciborium::Value::Text("approve".into()),
+        ),
+        (
+            ciborium::Value::Text("offerCoreDigest".into()),
+            ciborium::Value::Bytes([0x54; 32].to_vec()),
+        ),
+        (
+            ciborium::Value::Text("predecessorDigest".into()),
+            ciborium::Value::Bytes(offer.content_hash().to_vec()),
+        ),
+    ]))
+    .unwrap();
+    let decision = CredentialV2Object::new(
+        CredentialV2Kind::IntentApprove,
+        intent_digest,
+        decision_body,
+    )
+    .unwrap();
+    let claimant_frame = claimant_channel.seal(decision.as_bytes()).unwrap();
+    one_checkpoint(
+        allocator
+            .receive(
+                &server(ServerMessage::Frame {
+                    peer_seq: 2,
+                    body: cbcl_pairing::credential_v2::encode_frame(&claimant_frame).unwrap(),
+                }),
+                NOW,
+                CredentialV2CheckpointNonce::from_csprng([0x55; 12]),
+            )
+            .unwrap(),
+        8,
+    );
+    let decision_effects = allocator.checkpoint_persisted(8).unwrap();
+    assert!(matches!(
+        sent(&decision_effects)[0],
+        ClientMessage::Ack { peer_seq: 2 }
+    ));
+    assert!(matches!(
+        &decision_effects[1],
+        CredentialV2AllocatorEffect::ReceivedObject { object } if object == &decision
+    ));
 }
 
 #[test]
@@ -251,7 +341,7 @@ fn carrier_and_checkpoint_are_withheld_on_allocation_mismatch_or_expiry() {
         },
     ] {
         let mut allocator =
-            CredentialV2AllocatorSession::new(input(), Box::new(RefuseBodies)).unwrap();
+            CredentialV2AllocatorSession::new(input(), Box::new(AcceptBodies)).unwrap();
         allocator
             .receive(
                 &server(ServerMessage::Welcome),
