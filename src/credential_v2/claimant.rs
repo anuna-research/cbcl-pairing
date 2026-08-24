@@ -193,6 +193,13 @@ impl CredentialV2ClaimantSession {
         self.authenticated_offer_body.as_deref()
     }
 
+    /// Report the sole post-Finished point where the consumer may commit a
+    /// newly approved exact-pair policy row.
+    #[must_use]
+    pub const fn is_awaiting_profile_authorisation(&self) -> bool {
+        matches!(self.phase, ClaimantPhase::AwaitProfileAuthorisation)
+    }
+
     fn apply_server(
         &mut self,
         message: ServerMessage,
