@@ -41,6 +41,7 @@ impl CredentialV2ClaimantOfferVerifier for UnusedOfferVerifier {
         &mut self,
         _: &mut CredentialV2Endpoint,
         _: &CredentialV2Object,
+        _: u64,
     ) -> Result<CredentialV2Advance, CredentialV2Error> {
         panic!("bootstrap must not attempt to display an offer")
     }

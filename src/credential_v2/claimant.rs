@@ -38,6 +38,7 @@ pub trait CredentialV2ClaimantOfferVerifier: fmt::Debug + Send {
         &mut self,
         endpoint: &mut CredentialV2Endpoint,
         object: &super::CredentialV2Object,
+        now: u64,
     ) -> Result<CredentialV2Advance, CredentialV2Error>;
 }
 
@@ -106,6 +107,7 @@ pub struct CredentialV2ClaimantSession {
     channel: Option<Box<SecureCredentialV2Channel>>,
     body_verifier: Option<Box<dyn CredentialV2BodyVerifier>>,
     offer_verifier: Option<Box<dyn CredentialV2ClaimantOfferVerifier>>,
+    authenticated_offer_body: Option<Vec<u8>>,
 }
 
 impl fmt::Debug for CredentialV2ClaimantSession {
@@ -138,6 +140,7 @@ impl CredentialV2ClaimantSession {
             channel: None,
             body_verifier: Some(body_verifier),
             offer_verifier: Some(offer_verifier),
+            authenticated_offer_body: None,
         })
     }
 
@@ -164,7 +167,7 @@ impl CredentialV2ClaimantSession {
         }
         let result = decode_server_message(input)
             .map_err(|_| CredentialV2Error::Schema)
-            .and_then(|message| self.apply_server(message));
+            .and_then(|message| self.apply_server(message, now));
         if result.is_err() {
             self.terminate();
         }
@@ -181,9 +184,16 @@ impl CredentialV2ClaimantSession {
         Ok(())
     }
 
+    /// Borrow the exact signed-offer body only after authenticated display.
+    #[must_use]
+    pub fn authenticated_offer_body(&self) -> Option<&[u8]> {
+        self.authenticated_offer_body.as_deref()
+    }
+
     fn apply_server(
         &mut self,
         message: ServerMessage,
+        now: u64,
     ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
         match message {
             ServerMessage::Welcome if self.phase == ClaimantPhase::AwaitWelcome => {
@@ -208,7 +218,7 @@ impl CredentialV2ClaimantSession {
             } if self.phase == ClaimantPhase::ClaimSent => {
                 self.claimed(mailbox_id, membership_token, expires_at)
             }
-            ServerMessage::Frame { peer_seq, body } => self.peer_frame(peer_seq, &body),
+            ServerMessage::Frame { peer_seq, body } => self.peer_frame(peer_seq, &body, now),
             ServerMessage::Acknowledged { seq } => self.local_ack(seq),
             ServerMessage::Pong => Ok(Vec::new()),
             ServerMessage::Closed(_) | ServerMessage::Error(_) => {
@@ -254,10 +264,11 @@ impl CredentialV2ClaimantSession {
         &mut self,
         peer_seq: u8,
         body: &[u8],
+        now: u64,
     ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
         let frame = decode_frame(body)?;
         if self.phase == ClaimantPhase::Established {
-            return self.peer_application_frame(peer_seq, frame);
+            return self.peer_application_frame(peer_seq, frame, now);
         }
         self.relay_mut()?.accept_peer_sequence(peer_seq)?;
         let ack = CredentialV2ClaimantEffect::Send(relay_message(ClientMessage::Ack { peer_seq })?);
@@ -388,6 +399,7 @@ impl CredentialV2ClaimantSession {
         &mut self,
         peer_seq: u8,
         frame: CredentialV2Frame,
+        now: u64,
     ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
         self.relay_mut()?.accept_peer_sequence(peer_seq)?;
         let plaintext = self
@@ -406,10 +418,12 @@ impl CredentialV2ClaimantSession {
             .verify_offer(
                 self.endpoint.as_mut().ok_or(CredentialV2Error::Phase)?,
                 &object,
+                now,
             )?;
         let CredentialV2Advance::DisplayIntent(display) = advance else {
             return Err(CredentialV2Error::Phase);
         };
+        self.authenticated_offer_body = Some(object.body().to_vec());
         Ok(vec![
             CredentialV2ClaimantEffect::Send(relay_message(ClientMessage::Ack { peer_seq })?),
             CredentialV2ClaimantEffect::DisplayIntent(display),
@@ -436,6 +450,7 @@ impl CredentialV2ClaimantSession {
         self.endpoint = None;
         self.channel = None;
         self.relay = None;
+        self.authenticated_offer_body = None;
     }
 }
 
