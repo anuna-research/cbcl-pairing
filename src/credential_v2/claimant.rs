@@ -1,8 +1,9 @@
 use super::{
     decode_frame, decode_object, encode_frame, CredentialV2Advance, CredentialV2BodyVerifier,
     CredentialV2Carrier, CredentialV2Context, CredentialV2Endpoint, CredentialV2Error,
-    CredentialV2Frame, CredentialV2Kind, CredentialV2Presence, CredentialV2PresenceCode,
-    CredentialV2RelayState, PendingCredentialV2Channel, SecureCredentialV2Channel,
+    CredentialV2Frame, CredentialV2Kind, CredentialV2Phase, CredentialV2Presence,
+    CredentialV2PresenceCode, CredentialV2RelayState, PendingCredentialV2Channel,
+    SecureCredentialV2Channel,
 };
 use crate::{
     cpace,
@@ -57,6 +58,11 @@ pub enum CredentialV2ClaimantEffect {
     },
     /// Display only the Selfsame-verified, authenticated private intent.
     DisplayIntent(Box<super::CredentialV2Display>),
+    /// One authenticated peer successor advanced the memory-only endpoint.
+    ReceivedObject {
+        /// Fully recognised padded object and its exact logical body.
+        object: super::CredentialV2Object,
+    },
     /// Relay or protocol termination before completion.
     Terminal,
 }
@@ -70,6 +76,11 @@ impl fmt::Debug for CredentialV2ClaimantEffect {
                 .field("transcript_hash", &transcript_hash.as_slice())
                 .finish(),
             Self::DisplayIntent(_) => formatter.write_str("DisplayIntent([AUTHENTICATED])"),
+            Self::ReceivedObject { object } => formatter
+                .debug_struct("ReceivedObject")
+                .field("kind", &object.kind())
+                .field("body_bytes", &object.body().len())
+                .finish(),
             Self::Terminal => formatter.write_str("Terminal"),
         }
     }
@@ -198,6 +209,40 @@ impl CredentialV2ClaimantSession {
     #[must_use]
     pub const fn is_awaiting_profile_authorisation(&self) -> bool {
         matches!(self.phase, ClaimantPhase::AwaitProfileAuthorisation)
+    }
+
+    /// Seal one pre-final claimant object without creating durable authority.
+    ///
+    /// Final approval and payload are deliberately absent from this API. They
+    /// require the claimant checkpoint barrier and a custody-derived wrapping
+    /// key supplied only after the corresponding person decision.
+    pub fn prepare_application_object(
+        &mut self,
+        object: &super::CredentialV2Object,
+    ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
+        if self.phase != ClaimantPhase::Established
+            || !matches!(
+                object.kind(),
+                CredentialV2Kind::IntentApprove
+                    | CredentialV2Kind::IntentDecline
+                    | CredentialV2Kind::Preparation
+                    | CredentialV2Kind::Refusal
+                    | CredentialV2Kind::FinalDecline
+            )
+        {
+            return Err(CredentialV2Error::Phase);
+        }
+        let endpoint = self.endpoint.as_mut().ok_or(CredentialV2Error::Phase)?;
+        let channel = self.channel.as_mut().ok_or(CredentialV2Error::Phase)?;
+        let relay = self.relay.as_mut().ok_or(CredentialV2Error::Phase)?;
+        let frame = endpoint.prepare_outbound(object, channel, relay)?;
+        let sequence = relay.cached_application_sequence()?;
+        Ok(vec![CredentialV2ClaimantEffect::Send(relay_message(
+            ClientMessage::Put {
+                seq: sequence,
+                body: encode_frame(&frame)?,
+            },
+        )?)])
     }
 
     fn apply_server(
@@ -418,26 +463,32 @@ impl CredentialV2ClaimantSession {
             .ok_or(CredentialV2Error::Phase)?
             .open(&frame)?;
         let object = decode_object(&plaintext)?;
-        if object.kind() != CredentialV2Kind::Offer {
-            return Err(CredentialV2Error::Phase);
-        }
-        let advance = self
-            .offer_verifier
-            .as_mut()
-            .ok_or(CredentialV2Error::Phase)?
-            .verify_offer(
-                self.endpoint.as_mut().ok_or(CredentialV2Error::Phase)?,
-                &object,
-                now,
-            )?;
-        let CredentialV2Advance::DisplayIntent(display) = advance else {
-            return Err(CredentialV2Error::Phase);
+        let endpoint = self.endpoint.as_mut().ok_or(CredentialV2Error::Phase)?;
+        let advance = if endpoint.phase() == CredentialV2Phase::Begin {
+            if object.kind() != CredentialV2Kind::Offer {
+                return Err(CredentialV2Error::Phase);
+            }
+            self.offer_verifier
+                .as_mut()
+                .ok_or(CredentialV2Error::Phase)?
+                .verify_offer(endpoint, &object, now)?
+        } else {
+            endpoint.receive(&object)?
         };
-        self.authenticated_offer_body = Some(object.body().to_vec());
-        Ok(vec![
-            CredentialV2ClaimantEffect::Send(relay_message(ClientMessage::Ack { peer_seq })?),
-            CredentialV2ClaimantEffect::DisplayIntent(display),
-        ])
+        let mut effects = vec![CredentialV2ClaimantEffect::Send(relay_message(
+            ClientMessage::Ack { peer_seq },
+        )?)];
+        match advance {
+            CredentialV2Advance::DisplayIntent(display) => {
+                self.authenticated_offer_body = Some(object.body().to_vec());
+                effects.push(CredentialV2ClaimantEffect::DisplayIntent(display));
+            }
+            CredentialV2Advance::Advanced => {
+                effects.push(CredentialV2ClaimantEffect::ReceivedObject { object });
+            }
+            CredentialV2Advance::ExactRetransmission => {}
+        }
+        Ok(effects)
     }
 
     fn relay_ref(&self) -> Result<&CredentialV2RelayState, CredentialV2Error> {

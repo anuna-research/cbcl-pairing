@@ -162,8 +162,9 @@ impl CredentialV2Endpoint {
             return Err(CredentialV2Error::Direction);
         }
         if let Some(cached) = relay.cached_outbound_frame().cloned() {
-            return match self.send(object)? {
-                CredentialV2Advance::ExactRetransmission => Ok(cached),
+            return match self.exact_retransmission(object, self.side) {
+                Some(Ok(CredentialV2Advance::ExactRetransmission)) => Ok(cached),
+                Some(Err(error)) => Err(error),
                 _ => Err(CredentialV2Error::Phase),
             };
         }

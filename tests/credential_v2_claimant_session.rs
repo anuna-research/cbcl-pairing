@@ -3,18 +3,22 @@
 use cbcl_pairing::{
     cpace,
     credential_v2::{
-        decode_frame, encode_frame, CredentialV2Advance, CredentialV2BodyVerifier,
-        CredentialV2Carrier, CredentialV2CarrierInput, CredentialV2ClaimantEffect,
-        CredentialV2ClaimantOfferVerifier, CredentialV2ClaimantSession,
-        CredentialV2ClaimantSessionInput, CredentialV2Context, CredentialV2Endpoint,
-        CredentialV2Error, CredentialV2Frame, CredentialV2LogicalBody, CredentialV2Object,
-        CredentialV2Presence, CredentialV2PresenceCode, PendingCredentialV2Channel,
+        credential_v2_intent_digest, decode_frame, encode_frame, CredentialV2AccountProvenance,
+        CredentialV2Advance, CredentialV2BodyVerifier, CredentialV2Carrier,
+        CredentialV2CarrierInput, CredentialV2ClaimantEffect, CredentialV2ClaimantOfferVerifier,
+        CredentialV2ClaimantSession, CredentialV2ClaimantSessionInput, CredentialV2Context,
+        CredentialV2DeviceBinding, CredentialV2Endpoint, CredentialV2Error, CredentialV2Frame,
+        CredentialV2IntentAuthority, CredentialV2IntentClaims, CredentialV2IntentInput,
+        CredentialV2IntentVerifier, CredentialV2Kind, CredentialV2LogicalBody, CredentialV2Object,
+        CredentialV2OfferParser, CredentialV2Presence, CredentialV2PresenceCode,
+        CredentialV2TofuState, CredentialV2Transition, PendingCredentialV2Channel,
     },
     wire::{
         claim_commitment, decode_client_message, encode_server_message, ClaimToken, ClientMessage,
         ServerMessage, Side,
     },
 };
+use ciborium::Value;
 
 const NOW: u64 = 1_800_000_000;
 const EXPIRY: u64 = NOW + 900;
@@ -23,6 +27,8 @@ const CPACE_SECRET: [u8; 16] = [0x62; 16];
 const CLAIM_TOKEN: [u8; 16] = [0x63; 16];
 const PROFILE_DIGEST: [u8; 32] = [0x64; 32];
 const MEMBERSHIP: [u8; 32] = [0x65; 32];
+const CEREMONY: [u8; 32] = [0x66; 32];
+const OFFER_CORE: [u8; 32] = [0x74; 32];
 
 #[derive(Debug)]
 struct AcceptBodies;
@@ -33,18 +39,93 @@ impl CredentialV2BodyVerifier for AcceptBodies {
     }
 }
 
-#[derive(Debug)]
-struct UnusedOfferVerifier;
+fn claims() -> CredentialV2IntentClaims {
+    CredentialV2IntentClaims::new(
+        "https://chat.anuna.io/selfsame/v2",
+        "https://chat.anuna.io",
+        "https://chat.anuna.io:9443",
+        CEREMONY,
+        CredentialV2AccountProvenance::new([0x75; 32], [0x76; 32]),
+        vec!["https://chat.anuna.io/selfsame/v2#chat-send".into()],
+        CredentialV2DeviceBinding::new(format!("did:key:z6Mk{}", "1".repeat(44)), [0x77; 32])
+            .unwrap(),
+        CredentialV2Transition::NoTransition,
+        OFFER_CORE,
+    )
+    .unwrap()
+}
 
-impl CredentialV2ClaimantOfferVerifier for UnusedOfferVerifier {
+#[derive(Debug)]
+struct OfferParser;
+
+impl CredentialV2OfferParser for OfferParser {
+    fn parse_signed_offer(
+        &mut self,
+        body: &[u8],
+    ) -> Result<CredentialV2IntentClaims, CredentialV2Error> {
+        (body == [0x81])
+            .then(claims)
+            .ok_or(CredentialV2Error::Profile)
+    }
+}
+
+#[derive(Debug)]
+struct IntentVerifier;
+
+impl CredentialV2IntentVerifier for IntentVerifier {
+    fn verify(
+        &mut self,
+        peer: &CredentialV2IntentInput,
+        authority: &CredentialV2IntentAuthority,
+    ) -> Result<(), CredentialV2Error> {
+        (peer.carrier_ceremony_id() == authority.carrier_ceremony_id())
+            .then_some(())
+            .ok_or(CredentialV2Error::Profile)
+    }
+}
+
+#[derive(Debug)]
+struct TestOfferVerifier;
+
+impl CredentialV2ClaimantOfferVerifier for TestOfferVerifier {
     fn verify_offer(
         &mut self,
-        _: &mut CredentialV2Endpoint,
-        _: &CredentialV2Object,
+        endpoint: &mut CredentialV2Endpoint,
+        object: &CredentialV2Object,
         _: u64,
     ) -> Result<CredentialV2Advance, CredentialV2Error> {
-        panic!("bootstrap must not attempt to display an offer")
+        endpoint.receive_offer(
+            object,
+            &CredentialV2IntentAuthority::new(claims(), CredentialV2TofuState::NewPair)?,
+            &mut OfferParser,
+            &mut IntentVerifier,
+        )
     }
+}
+
+fn offer() -> CredentialV2Object {
+    CredentialV2Object::new(
+        CredentialV2Kind::Offer,
+        credential_v2_intent_digest(OFFER_CORE),
+        vec![0x81],
+    )
+    .unwrap()
+}
+
+fn successor(kind: CredentialV2Kind, predecessor: &CredentialV2Object) -> CredentialV2Object {
+    let body = cbor2::to_canonical_vec(&Value::Map(vec![
+        (
+            Value::Text("carrierCeremonyId".into()),
+            Value::Bytes(CEREMONY.to_vec()),
+        ),
+        (
+            Value::Text("predecessorDigest".into()),
+            Value::Bytes(predecessor.content_hash().to_vec()),
+        ),
+        (Value::Text("fixture".into()), Value::Integer(1.into())),
+    ]))
+    .unwrap();
+    CredentialV2Object::new(kind, *predecessor.intent_digest(), body).unwrap()
 }
 
 fn carrier() -> CredentialV2Carrier {
@@ -52,7 +133,7 @@ fn carrier() -> CredentialV2Carrier {
         application_context: "https://chat.anuna.io/selfsame/v2".into(),
         relay_origin: "https://chat.anuna.io:9443".into(),
         mailbox_id: MAILBOX,
-        carrier_ceremony_id: [0x66; 32],
+        carrier_ceremony_id: CEREMONY,
         carrier_nonce: [0x67; 32],
         claim_commitment: claim_commitment(MAILBOX, &ClaimToken::new(CLAIM_TOKEN)),
         relay_expires_at: EXPIRY,
@@ -172,7 +253,6 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
     )
     .unwrap();
     let allocator_finished = allocator_pending.local_finished_frame();
-    assert!(allocator_pending.confirm(&claimant_finished).is_ok());
 
     assert!(claimant
         .receive(&server(ServerMessage::Acknowledged { seq: 1 }), NOW)
@@ -196,10 +276,94 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
     assert_eq!(sent(&established), vec![ClientMessage::Ack { peer_seq: 1 }]);
 
     claimant
-        .authorise_authenticated_profile(Box::new(UnusedOfferVerifier))
+        .authorise_authenticated_profile(Box::new(TestOfferVerifier))
         .unwrap();
     assert!(matches!(
-        claimant.authorise_authenticated_profile(Box::new(UnusedOfferVerifier)),
+        claimant.authorise_authenticated_profile(Box::new(TestOfferVerifier)),
+        Err(CredentialV2Error::Phase)
+    ));
+
+    let mut allocator_channel = allocator_pending.confirm(&claimant_finished).unwrap();
+    let offer = offer();
+    let offer_frame = allocator_channel.seal(offer.as_bytes()).unwrap();
+    let displayed = claimant
+        .receive(
+            &server(ServerMessage::Frame {
+                peer_seq: 2,
+                body: encode_frame(&offer_frame).unwrap(),
+            }),
+            NOW,
+        )
+        .unwrap();
+    assert!(matches!(
+        displayed.as_slice(),
+        [
+            CredentialV2ClaimantEffect::Send(_),
+            CredentialV2ClaimantEffect::DisplayIntent(_)
+        ]
+    ));
+
+    let approve = successor(CredentialV2Kind::IntentApprove, &offer);
+    let approve_effects = claimant.prepare_application_object(&approve).unwrap();
+    let approve_commands = sent(&approve_effects);
+    let [ClientMessage::Put {
+        seq: 2,
+        body: sealed_approve,
+    }] = approve_commands.as_slice()
+    else {
+        panic!("preliminary approval must be the exact next memory-only frame")
+    };
+    assert_eq!(
+        allocator_channel
+            .open(&decode_frame(sealed_approve).unwrap())
+            .unwrap(),
+        approve.as_bytes()
+    );
+    claimant
+        .receive(&server(ServerMessage::Acknowledged { seq: 2 }), NOW)
+        .unwrap();
+
+    let preparation = successor(CredentialV2Kind::Preparation, &approve);
+    let preparation_effects = claimant.prepare_application_object(&preparation).unwrap();
+    let preparation_commands = sent(&preparation_effects);
+    let [ClientMessage::Put {
+        seq: 3,
+        body: sealed_preparation,
+    }] = preparation_commands.as_slice()
+    else {
+        panic!("preparation must remain an uncheckpointed memory-only frame")
+    };
+    assert_eq!(
+        allocator_channel
+            .open(&decode_frame(sealed_preparation).unwrap())
+            .unwrap(),
+        preparation.as_bytes()
+    );
+    claimant
+        .receive(&server(ServerMessage::Acknowledged { seq: 3 }), NOW)
+        .unwrap();
+
+    let comparison = successor(CredentialV2Kind::ComparisonConfirmed, &preparation);
+    let comparison_frame = allocator_channel.seal(comparison.as_bytes()).unwrap();
+    let compared = claimant
+        .receive(
+            &server(ServerMessage::Frame {
+                peer_seq: 3,
+                body: encode_frame(&comparison_frame).unwrap(),
+            }),
+            NOW,
+        )
+        .unwrap();
+    assert!(matches!(
+        compared.as_slice(),
+        [CredentialV2ClaimantEffect::Send(_), CredentialV2ClaimantEffect::ReceivedObject {
+            object
+        }] if object == &comparison
+    ));
+
+    let final_approve = successor(CredentialV2Kind::FinalApprove, &comparison);
+    assert!(matches!(
+        claimant.prepare_application_object(&final_approve),
         Err(CredentialV2Error::Phase)
     ));
 }

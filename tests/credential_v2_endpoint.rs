@@ -251,6 +251,29 @@ fn test_061_only_exact_latest_retransmission_is_idempotent() {
 }
 
 #[test]
+fn test_061_cached_outbound_refuses_a_successor_without_mutating_phase() {
+    let (_, mut claimant) = endpoints();
+    let offer = offer();
+    claimant
+        .receive_offer(&offer, &authority(), &mut Parser, &mut IntentVerifier)
+        .unwrap();
+    let approve = successor(CredentialV2Kind::IntentApprove, &offer);
+    let preparation = successor(CredentialV2Kind::Preparation, &approve);
+    let (_, mut channel) = secure_channels();
+    let mut relay = CredentialV2RelayState::new([0x91; 32]);
+
+    claimant
+        .prepare_outbound(&approve, &mut channel, &mut relay)
+        .unwrap();
+    assert_eq!(claimant.phase(), CredentialV2Phase::IntentApproved);
+    assert_eq!(
+        claimant.prepare_outbound(&preparation, &mut channel, &mut relay),
+        Err(CredentialV2Error::Phase)
+    );
+    assert_eq!(claimant.phase(), CredentialV2Phase::IntentApproved);
+}
+
+#[test]
 fn test_061_wrong_sender_predecessor_intent_and_verifier_refusal_are_terminal() {
     let (mut allocator, mut claimant) = endpoints();
     let offer = offer();
