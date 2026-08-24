@@ -121,7 +121,6 @@ impl CredentialV2ClaimantSession {
     pub fn new(
         input: CredentialV2ClaimantSessionInput,
         body_verifier: Box<dyn CredentialV2BodyVerifier>,
-        offer_verifier: Box<dyn CredentialV2ClaimantOfferVerifier>,
     ) -> Result<Self, CredentialV2Error> {
         CredentialV2Context::derive(&input.carrier, input.profile_digest)?;
         Ok(Self {
@@ -139,7 +138,7 @@ impl CredentialV2ClaimantSession {
             endpoint: None,
             channel: None,
             body_verifier: Some(body_verifier),
-            offer_verifier: Some(offer_verifier),
+            offer_verifier: None,
             authenticated_offer_body: None,
         })
     }
@@ -176,10 +175,14 @@ impl CredentialV2ClaimantSession {
 
     /// Confirm that the peer-bound profile and any newly approved exact-pair
     /// policy are ready. No offer frame is accepted before this gate.
-    pub fn authorise_authenticated_profile(&mut self) -> Result<(), CredentialV2Error> {
+    pub fn authorise_authenticated_profile(
+        &mut self,
+        offer_verifier: Box<dyn CredentialV2ClaimantOfferVerifier>,
+    ) -> Result<(), CredentialV2Error> {
         if self.phase != ClaimantPhase::AwaitProfileAuthorisation {
             return Err(CredentialV2Error::Phase);
         }
+        self.offer_verifier = Some(offer_verifier);
         self.phase = ClaimantPhase::Established;
         Ok(())
     }

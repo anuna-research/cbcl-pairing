@@ -1,6 +1,9 @@
 //! SPEC-001 TEST-060: credential/v2 keeps machine carrier and human presence disjoint.
 
-use cbcl_pairing::credential_v2::CredentialV2PresenceCode;
+use cbcl_pairing::{
+    credential_v2::{CredentialV2Carrier, CredentialV2CarrierInput, CredentialV2PresenceCode},
+    wire::{claim_commitment, ClaimToken},
+};
 
 #[test]
 fn pair1_round_trips_independent_secrets_and_rejects_every_substitution() {
@@ -40,4 +43,22 @@ fn pair1_round_trips_independent_secrets_and_rejects_every_substitution() {
     ] {
         assert!(refused.parse::<CredentialV2PresenceCode>().is_err(), "{refused}");
     }
+
+    let carrier = CredentialV2Carrier::new(CredentialV2CarrierInput {
+        application_context: "https://chat.anuna.io/selfsame/v2".into(),
+        relay_origin: "https://chat.anuna.io:9443".into(),
+        mailbox_id: [0x31; 32],
+        carrier_ceremony_id: [0x32; 32],
+        carrier_nonce: [0x33; 32],
+        claim_commitment: claim_commitment([0x31; 32], &ClaimToken::new([0x22; 16])),
+        relay_expires_at: 1_800_000_900,
+        expected_allocator_key: None,
+    })
+    .unwrap();
+    assert!(CredentialV2PresenceCode::new([0x11; 16], [0x22; 16])
+        .bind_to_carrier(&carrier)
+        .is_ok());
+    assert!(CredentialV2PresenceCode::new([0x11; 16], [0x23; 16])
+        .bind_to_carrier(&carrier)
+        .is_err());
 }

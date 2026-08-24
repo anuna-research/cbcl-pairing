@@ -86,7 +86,6 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
             profile_digest: PROFILE_DIGEST,
         },
         Box::new(AcceptBodies),
-        Box::new(UnusedOfferVerifier),
     )
     .unwrap();
     assert_eq!(
@@ -196,9 +195,11 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
     ));
     assert_eq!(sent(&established), vec![ClientMessage::Ack { peer_seq: 1 }]);
 
-    claimant.authorise_authenticated_profile().unwrap();
-    assert_eq!(
-        claimant.authorise_authenticated_profile(),
-        Err(CredentialV2Error::Phase),
-    );
+    claimant
+        .authorise_authenticated_profile(Box::new(UnusedOfferVerifier))
+        .unwrap();
+    assert!(matches!(
+        claimant.authorise_authenticated_profile(Box::new(UnusedOfferVerifier)),
+        Err(CredentialV2Error::Phase)
+    ));
 }

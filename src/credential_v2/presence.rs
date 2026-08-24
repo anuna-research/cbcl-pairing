@@ -1,4 +1,5 @@
-use super::{CredentialV2Error, CredentialV2Presence};
+use super::{CredentialV2Carrier, CredentialV2Error, CredentialV2Presence};
+use crate::wire::{claim_commitment, ClaimToken};
 use sha2::{Digest, Sha256};
 use std::{fmt, str::FromStr};
 
@@ -33,6 +34,16 @@ impl CredentialV2PresenceCode {
     #[must_use]
     pub fn into_presence(self) -> CredentialV2Presence {
         CredentialV2Presence::new(self.cpace_secret, self.claim_token)
+    }
+
+    /// Require the separately entered claim token to open this exact carrier.
+    pub fn bind_to_carrier(self, carrier: &CredentialV2Carrier) -> Result<Self, CredentialV2Error> {
+        let commitment =
+            claim_commitment(*carrier.mailbox_id(), &ClaimToken::new(self.claim_token));
+        if commitment != *carrier.claim_commitment() {
+            return Err(CredentialV2Error::Profile);
+        }
+        Ok(self)
     }
 
     fn payload(&self) -> [u8; 34] {
