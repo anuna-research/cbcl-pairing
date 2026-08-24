@@ -6,6 +6,7 @@
 mod allocator;
 mod bootstrap;
 mod carrier;
+mod claimant;
 mod channel;
 mod checkpoint;
 mod context;
@@ -13,6 +14,7 @@ mod display;
 mod endpoint;
 mod frame;
 mod object;
+mod presence;
 
 pub use allocator::{
     CredentialV2AllocatorEffect, CredentialV2AllocatorSession, CredentialV2AllocatorSessionInput,
@@ -23,6 +25,10 @@ pub use bootstrap::{
 pub use carrier::{
     decode_carrier, encode_carrier, CredentialV2Carrier, CredentialV2CarrierInput,
     CredentialV2Presence,
+};
+pub use claimant::{
+    CredentialV2ClaimantEffect, CredentialV2ClaimantOfferVerifier, CredentialV2ClaimantSession,
+    CredentialV2ClaimantSessionInput,
 };
 pub use channel::{PendingCredentialV2Channel, SecureCredentialV2Channel};
 pub use checkpoint::{
@@ -43,6 +49,7 @@ pub use frame::{decode_frame, encode_frame, CredentialV2Frame};
 pub use object::{
     decode_object, CredentialV2Kind, CredentialV2Object, CONTROL_PADDING_BYTES, LARGE_PADDING_BYTES,
 };
+pub use presence::CredentialV2PresenceCode;
 
 use ciborium::Value;
 use std::{collections::BTreeSet, fmt, io::Cursor};
