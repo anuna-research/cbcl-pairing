@@ -3,6 +3,7 @@
 //! These types are disjoint from credential/v1. Generic bytes or a caller
 //! version cannot select this protocol.
 
+mod allocator;
 mod bootstrap;
 mod carrier;
 mod channel;
@@ -13,6 +14,9 @@ mod endpoint;
 mod frame;
 mod object;
 
+pub use allocator::{
+    CredentialV2AllocatorEffect, CredentialV2AllocatorSession, CredentialV2AllocatorSessionInput,
+};
 pub use bootstrap::{
     CredentialV2AllocatorBootstrap, CredentialV2AllocatorBootstrapPhase, CredentialV2RelayState,
 };

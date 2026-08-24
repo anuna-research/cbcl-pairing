@@ -60,6 +60,49 @@ impl CredentialV2RelayState {
         self.cached_outbound.as_ref()
     }
 
+    pub(super) fn accept_peer_sequence(&mut self, sequence: u8) -> Result<(), CredentialV2Error> {
+        if sequence != self.next_peer_sequence {
+            return Err(CredentialV2Error::Counter);
+        }
+        self.next_peer_sequence = self
+            .next_peer_sequence
+            .checked_add(1)
+            .ok_or(CredentialV2Error::Counter)?;
+        Ok(())
+    }
+
+    pub(super) fn queue_bootstrap_frame(&mut self) -> Result<u8, CredentialV2Error> {
+        if self.awaiting_ack || self.cached_outbound.is_some() {
+            return Err(CredentialV2Error::Phase);
+        }
+        let sequence = self.next_local_sequence;
+        self.next_local_sequence = self
+            .next_local_sequence
+            .checked_add(1)
+            .ok_or(CredentialV2Error::Counter)?;
+        self.awaiting_ack = true;
+        Ok(sequence)
+    }
+
+    pub(super) fn acknowledge_bootstrap_frame(
+        &mut self,
+        sequence: u8,
+    ) -> Result<(), CredentialV2Error> {
+        let expected = self
+            .next_local_sequence
+            .checked_sub(1)
+            .ok_or(CredentialV2Error::Counter)?;
+        if !self.awaiting_ack || sequence != expected || self.cached_outbound.is_some() {
+            return Err(CredentialV2Error::Counter);
+        }
+        self.awaiting_ack = false;
+        Ok(())
+    }
+
+    pub(super) const fn awaiting_ack(&self) -> bool {
+        self.awaiting_ack
+    }
+
     pub(super) fn cache_application_frame(
         &mut self,
         frame: CredentialV2Frame,
@@ -95,6 +138,7 @@ pub struct CredentialV2AllocatorBootstrap {
     phase: CredentialV2AllocatorBootstrapPhase,
     fresh_scalar: Option<Zeroizing<[u8; 32]>>,
     peer_cpace: Option<CredentialV2Frame>,
+    peer_finished: Option<CredentialV2Frame>,
     pending: Option<PendingCredentialV2Channel>,
     cached_outbound: Option<CredentialV2Frame>,
     checkpoint_generation: u64,
@@ -128,6 +172,7 @@ impl CredentialV2AllocatorBootstrap {
             phase: CredentialV2AllocatorBootstrapPhase::Allocated,
             fresh_scalar: None,
             peer_cpace: None,
+            peer_finished: None,
             pending: None,
             cached_outbound: None,
             checkpoint_generation: 0,
@@ -145,6 +190,18 @@ impl CredentialV2AllocatorBootstrap {
     #[must_use]
     pub const fn relay_state(&self) -> &CredentialV2RelayState {
         &self.relay
+    }
+
+    pub(super) const fn relay_state_mut(&mut self) -> &mut CredentialV2RelayState {
+        &mut self.relay
+    }
+
+    pub(super) const fn carrier(&self) -> &CredentialV2Carrier {
+        &self.carrier
+    }
+
+    pub(super) const fn checkpoint_state(&self) -> (u64, Option<[u8; 12]>) {
+        (self.checkpoint_generation, self.checkpoint_nonce)
     }
 
     /// Borrow the exact frame that recovery must retransmit before any advance.
@@ -185,6 +242,14 @@ impl CredentialV2AllocatorBootstrap {
         &mut self,
         peer_frame: &CredentialV2Frame,
     ) -> Result<CredentialV2Frame, CredentialV2Error> {
+        self.retain_peer_cpace(peer_frame)?;
+        self.prepare_finished()
+    }
+
+    pub(super) fn retain_peer_cpace(
+        &mut self,
+        peer_frame: &CredentialV2Frame,
+    ) -> Result<(), CredentialV2Error> {
         if self.phase != CredentialV2AllocatorBootstrapPhase::ShareSent {
             return Err(CredentialV2Error::Phase);
         }
@@ -194,6 +259,25 @@ impl CredentialV2AllocatorBootstrap {
         if peer_message.side != Side::Claimant {
             return Err(CredentialV2Error::Direction);
         }
+        if self
+            .peer_cpace
+            .as_ref()
+            .is_some_and(|retained| retained != peer_frame)
+        {
+            return Err(CredentialV2Error::Profile);
+        }
+        self.peer_cpace = Some(peer_frame.clone());
+        Ok(())
+    }
+
+    pub(super) fn prepare_finished(&mut self) -> Result<CredentialV2Frame, CredentialV2Error> {
+        if self.phase != CredentialV2AllocatorBootstrapPhase::ShareSent {
+            return Err(CredentialV2Error::Phase);
+        }
+        let peer_frame = self.peer_cpace.as_ref().ok_or(CredentialV2Error::Phase)?;
+        let peer_message = peer_frame
+            .cpace_message()
+            .ok_or(CredentialV2Error::Schema)?;
         let scalar = self.fresh_scalar.as_ref().ok_or(CredentialV2Error::Phase)?;
         let context = CredentialV2Context::derive(&self.carrier, self.profile_digest)?;
         let (state, local_message) =
@@ -211,11 +295,38 @@ impl CredentialV2AllocatorBootstrap {
             &encode_frame(peer_frame)?,
         )?;
         let finished = pending.local_finished_frame();
-        self.peer_cpace = Some(peer_frame.clone());
         self.pending = Some(pending);
         self.cached_outbound = Some(finished.clone());
         self.phase = CredentialV2AllocatorBootstrapPhase::FinishedSent;
         Ok(finished)
+    }
+
+    pub(super) fn retain_peer_finished(
+        &mut self,
+        peer_frame: &CredentialV2Frame,
+    ) -> Result<(), CredentialV2Error> {
+        if self.phase != CredentialV2AllocatorBootstrapPhase::FinishedSent {
+            return Err(CredentialV2Error::Phase);
+        }
+        let Some((side, _)) = peer_frame.finished() else {
+            return Err(CredentialV2Error::Finished);
+        };
+        if side != Side::Claimant {
+            return Err(CredentialV2Error::Direction);
+        }
+        if self
+            .peer_finished
+            .as_ref()
+            .is_some_and(|retained| retained != peer_frame)
+        {
+            return Err(CredentialV2Error::Profile);
+        }
+        self.peer_finished = Some(peer_frame.clone());
+        Ok(())
+    }
+
+    pub(super) const fn peer_finished(&self) -> Option<&CredentialV2Frame> {
+        self.peer_finished.as_ref()
     }
 
     /// Confirm the peer Finished value, dropping `C`, scalar, and pending schedule.
@@ -321,6 +432,7 @@ impl CredentialV2AllocatorBootstrap {
             self.fresh_scalar.as_ref().map(|value| value.as_slice()),
         );
         append_optional_frame(&mut output, self.peer_cpace.as_ref())?;
+        append_optional_frame(&mut output, self.peer_finished.as_ref())?;
         append_optional_frame(&mut output, self.cached_outbound.as_ref())?;
         output.extend_from_slice(&generation.to_be_bytes());
         output.extend_from_slice(&nonce);
@@ -358,6 +470,7 @@ impl CredentialV2AllocatorBootstrap {
         };
         let fresh_scalar = cursor.optional_array()?.map(Zeroizing::new);
         let peer_cpace = cursor.optional_frame()?;
+        let peer_finished = cursor.optional_frame()?;
         let cached_outbound = cursor.optional_frame()?;
         let generation = cursor.u64()?;
         let nonce = cursor.array()?;
@@ -372,6 +485,7 @@ impl CredentialV2AllocatorBootstrap {
             phase,
             fresh_scalar,
             peer_cpace,
+            peer_finished,
             pending: None,
             cached_outbound,
             checkpoint_generation: generation,
@@ -419,6 +533,7 @@ impl CredentialV2AllocatorBootstrap {
                 claim.is_some()
                     && self.fresh_scalar.is_none()
                     && self.peer_cpace.is_none()
+                    && self.peer_finished.is_none()
                     && self.pending.is_none()
                     && self.cached_outbound.is_none()
             }
@@ -426,13 +541,19 @@ impl CredentialV2AllocatorBootstrap {
                 claim.is_none()
                     && self.fresh_scalar.is_none()
                     && self.peer_cpace.is_none()
+                    && self.peer_finished.is_none()
                     && self.pending.is_none()
                     && self.cached_outbound.is_none()
             }
             CredentialV2AllocatorBootstrapPhase::ShareSent => {
                 claim.is_none()
                     && self.fresh_scalar.is_some()
-                    && self.peer_cpace.is_none()
+                    && self.peer_cpace.as_ref().is_none_or(|frame| {
+                        frame
+                            .cpace_message()
+                            .is_some_and(|message| message.side == Side::Claimant)
+                    })
+                    && self.peer_finished.is_none()
                     && self.pending.is_none()
                     && self
                         .cached_outbound
@@ -456,6 +577,11 @@ impl CredentialV2AllocatorBootstrap {
                                 ..
                             }
                         )
+                    })
+                    && self.peer_finished.as_ref().is_none_or(|frame| {
+                        frame
+                            .finished()
+                            .is_some_and(|(side, _)| side == Side::Claimant)
                     })
             }
         }

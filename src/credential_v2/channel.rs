@@ -196,6 +196,12 @@ impl fmt::Debug for SecureCredentialV2Channel {
 }
 
 impl SecureCredentialV2Channel {
+    /// Return the exact transcript hash authenticated by both Finished values.
+    #[must_use]
+    pub const fn transcript_hash(&self) -> [u8; 64] {
+        self.transcript_hash
+    }
+
     pub(super) fn can_seal(&self, plaintext: &[u8]) -> Result<(), CredentialV2Error> {
         if self.terminal {
             return Err(CredentialV2Error::Terminal);
