@@ -4,19 +4,19 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.7-draft
-last-updated: 2026-08-24
+version: 0.5.8-draft
+last-updated: 2026-08-25
 owner-repo: cbcl-pairing
-implementation-status: credential-v1-local-complete; credential-v2-unimplemented
-implementation-baseline: c22f2d0526432c01c56d64be35a8d4f87516ec92
+implementation-status: credential-v1-local-complete; credential-v2-local-complete
+implementation-baseline: 62ef4a968b46b4836374fcee1d78c410f730a7a7
 documentation-baseline: b2a9df8166bf92be8e2207f84830e03c9db9f750
 derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574edc8
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
 authority-form: consolidated-current-protocol-and-consumer-pointer
-consumer-design: selfsame SPEC-008 0.5.8-draft
-coordinated-safety-design: selfsame SPEC-007 0.3.6-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.8-draft
+consumer-design: selfsame SPEC-008 0.5.17-draft
+coordinated-safety-design: selfsame SPEC-007 0.3.8-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.13-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
@@ -1834,10 +1834,10 @@ permissions, device binding, exact-pair TOFU state, transition, and signed
 offer-core digest.
 
 For the Selfsame profile, `CredentialV2IntentInput` is constructed only from
-the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.8-draft
+the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.13-draft
 CON-012's `signed-offer-v2` and its exact `OfferCoreV2`. The other ten body
 kinds cannot construct or amend an intent input. The consumer's nine successor
-body grammars are Selfsame SPEC-008 0.5.8-draft CON-987.
+body grammars are Selfsame SPEC-008 0.5.17-draft CON-987.
 
 The profile first parses one bounded peer `CredentialV2IntentInput`. Before any
 display allocation, it SHALL require byte equality between every overlapping
@@ -2188,9 +2188,9 @@ pointer, one current hub pointer, and one current test set.
 The current test set contains TEST-001 through TEST-029 and TEST-060 through
 TEST-067. No trajectory test supplies current authority.
 
-The current consumer is Selfsame SPEC-008 0.5.8-draft. The current safety
-authority is Selfsame SPEC-007 0.3.6-draft. The current hub design is cbcl-bus
-SPEC-053 0.17.8-draft.
+The current consumer is Selfsame SPEC-008 0.5.17-draft. The current safety
+authority is Selfsame SPEC-007 0.3.8-draft. The current hub design is cbcl-bus
+SPEC-053 0.17.13-draft.
 
 All four coordinated parents record the same generation metadata and review
 set.
@@ -2392,7 +2392,13 @@ required Tier-1 review.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.5.7-draft</summary>
+<summary>Revision history — 0.1.0 → 0.5.8-draft</summary>
+
+- 0.5.8-draft — reissues the unchanged credential/v2 protocol against the
+  coordinated Selfsame 0.5.17, safety 0.3.8, and hub 0.17.13 authorities. The
+  implementation status and baseline now record the completed `62ef4a9`
+  credential/v2 code. Production allocation, release, and deployment remain
+  prohibited.
 
 - 0.5.7-draft — fixes the credential/v2 mailbox lifetime at 900 seconds. It
   defines the checkpoint-key info, extract, expand, and output exactly. It
