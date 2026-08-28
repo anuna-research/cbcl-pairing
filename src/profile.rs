@@ -77,27 +77,98 @@ pub struct ProfileDescriptor {
 }
 
 /// One human-displayable field produced only after full profile recognition.
+///
+/// External callers cannot fabricate a recognised field:
+///
+/// ```compile_fail
+/// use cbcl_pairing::profile::DisplayField;
+/// let _ = DisplayField {
+///     label: "forged",
+///     value: "peer text".into(),
+///     claimed_by_secret_holder: false,
+/// };
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct DisplayField {
     /// Stable field label.
-    pub label: &'static str,
+    label: &'static str,
     /// Fully recognised display value.
-    pub value: String,
+    value: String,
     /// Whether the value is an unverified holder claim.
-    pub claimed_by_secret_holder: bool,
+    claimed_by_secret_holder: bool,
+}
+
+impl DisplayField {
+    /// Borrow the stable field label.
+    #[must_use]
+    pub const fn label(&self) -> &'static str {
+        self.label
+    }
+
+    /// Borrow the fully recognised display value.
+    #[must_use]
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    /// Report whether this legacy field is an unverified holder claim.
+    #[must_use]
+    pub const fn claimed_by_secret_holder(&self) -> bool {
+        self.claimed_by_secret_holder
+    }
 }
 
 /// Fully profile-recognised intent safe to present for approval.
+///
+/// External callers cannot replace its recognised display body:
+///
+/// ```compile_fail
+/// use cbcl_pairing::profile::DisplayIntent;
+/// let _ = DisplayIntent {
+///     application: "forged".into(),
+///     action: "approve".into(),
+///     authority_summary: "unchecked".into(),
+///     fields: Vec::new(),
+/// };
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct DisplayIntent {
     /// Exact application identifier.
-    pub application: String,
+    application: String,
     /// Exact profile action.
-    pub action: String,
+    action: String,
     /// Human-readable authority summary.
-    pub authority_summary: String,
+    authority_summary: String,
     /// Profile-defined recognised fields.
-    pub fields: Vec<DisplayField>,
+    fields: Vec<DisplayField>,
+}
+
+impl DisplayIntent {
+    /// Borrow the exact legacy application identifier.
+    #[must_use]
+    pub fn application(&self) -> &str {
+        &self.application
+    }
+
+    /// Borrow the exact legacy profile action.
+    #[must_use]
+    pub fn action(&self) -> &str {
+        &self.action
+    }
+
+    /// Borrow the recognised legacy authority summary.
+    #[must_use]
+    pub fn authority_summary(&self) -> &str {
+        &self.authority_summary
+    }
+
+    /// Borrow the ordered recognised legacy fields.
+    #[must_use]
+    pub fn fields(&self) -> &[DisplayField] {
+        &self.fields
+    }
 }
 
 /// Opaque, non-plaintext binding retained after intent display.
@@ -203,7 +274,7 @@ pub trait ApplicationProfile: fmt::Debug + Send {
     fn recognise_invitation(&self, invitation: &Invitation) -> Result<(), ProfileError>;
 
     /// Fully recognise an intent before any display or approval affordance.
-    fn recognise_intent(&self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError>;
+    fn recognise_intent(&mut self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError>;
 
     /// Recognise a payload and its binding without invoking the grant verifier.
     fn recognise_payload(
@@ -503,7 +574,7 @@ impl ApplicationProfile for AgentProfile {
         Ok(())
     }
 
-    fn recognise_intent(&self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
+    fn recognise_intent(&mut self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
         common_intent(&self.descriptor, AGENT_ACTION, intent)?;
         let claims = decode_agent_claims(&intent.allocator_claim, &intent.claimant_claim)?;
         let binding = agent_binding(&claims)?;
@@ -581,7 +652,7 @@ impl ApplicationProfile for CredentialProfile {
         Ok(())
     }
 
-    fn recognise_intent(&self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
+    fn recognise_intent(&mut self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
         common_intent(&self.descriptor, CREDENTIAL_ACTION, intent)?;
         let claims = decode_credential_claims(&intent.allocator_claim, &intent.claimant_claim)?;
         let binding = credential_binding(&claims)?;
@@ -658,7 +729,7 @@ impl ApplicationProfile for SyntheticProfile {
         Ok(())
     }
 
-    fn recognise_intent(&self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
+    fn recognise_intent(&mut self, intent: &PairingIntent) -> Result<ProfileIntent, ProfileError> {
         common_intent(&self.descriptor, SYNTHETIC_ACTION, intent)?;
         let claims = decode_synthetic_claims(&intent.allocator_claim, &intent.claimant_claim)?;
         let binding = synthetic_binding(&claims)?;

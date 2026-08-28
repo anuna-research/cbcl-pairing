@@ -96,10 +96,10 @@ fn intent(application: &str, action: &str, claims: (Vec<u8>, Vec<u8>)) -> Pairin
 #[test]
 fn test_010_profiles_are_endpoint_local_and_describe_their_carriers() {
     let (agent_verifier, _) = verifier(true);
-    let agent = AgentProfile::new(agent_verifier);
+    let mut agent = AgentProfile::new(agent_verifier);
     let (credential_verifier, _) = verifier(true);
-    let credential = CredentialProfile::new(credential_verifier);
-    let synthetic = SyntheticProfile::new(true);
+    let mut credential = CredentialProfile::new(credential_verifier);
+    let mut synthetic = SyntheticProfile::new(true);
 
     assert_eq!(agent.descriptor().application, AGENT_APPLICATION);
     assert_eq!(agent.descriptor().carrier.locator, LocatorKind::Nameplate);
@@ -200,19 +200,19 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/schemas/pairing-v1.cddl"
             ))
             .as_slice(),
-            "c8f7e57a1a944dd999ebeeb20260368d3315ade26748fbab8361de2643240fc9",
+            "8d676f35c8a9fe67cd96efe3e6a79ec9e0dfcc23211beed0776fdd4716491d8f",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/mailbox.rs")).as_slice(),
-            "5df5fdca0c9105140e5ab20a7155b3db56030738b1b0a3d60a5ba77d8ee969f6",
+            "6e1c5a4ca4cc49a1daee00fba868c33be517e2b760ec30fc4d3609a3c4d6bfd6",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/storage.rs")).as_slice(),
-            "0b9725180d06bdac907bbaeb1fafab06daa1ce45bbc409ada3cefc51a51fa1d5",
+            "53f604025214f6bb6afd6bb3f5c0d67a7fc8e96bed9df0400b357bfb4c427449",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/relay.rs")).as_slice(),
-            "fd2956de38791f96660615feccba0d0287da1eebf3bbda1a8c74a4600d3af834",
+            "4fc306940ea57585b142967b3a387bcd6507e735ce223791184e9814c7c356eb",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/limiter.rs")).as_slice(),
@@ -224,7 +224,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).as_slice(),
-            "b71ff778cb624ba855c8125d38939283fb55b55e1af50375f02ef582d729d84a",
+            "ba516fa79716e9567a839f029761f4c8b0ed460592d5a8c3fdb529507be2af8c",
         ),
         (
             include_bytes!(concat!(
@@ -232,7 +232,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/.forgejo/workflows/ci.yml"
             ))
             .as_slice(),
-            "636c7c77c049280338c61f2a13a1fd05b610cad773c2d9ef849ef70a46e4832a",
+            "a359bb4b0acd7c9af5c77d70c0cc946212e06e4f0e439df8b0c44a98988d2c45",
         ),
     ] {
         assert_eq!(hex::encode(Sha256::digest(bytes)), expected);
@@ -295,7 +295,7 @@ fn credential_and_synthetic_payloads_bind_every_profile_field() {
         recipient: "new phone".into(),
     };
     let (credential_verifier, _) = verifier(true);
-    let credential = CredentialProfile::new(credential_verifier);
+    let mut credential = CredentialProfile::new(credential_verifier);
     let (_, credential_binding) = credential
         .recognise_intent(&intent(
             CREDENTIAL_APPLICATION,
@@ -325,7 +325,7 @@ fn credential_and_synthetic_payloads_bind_every_profile_field() {
         subject: "subject-1".into(),
         audience: "audience-2".into(),
     };
-    let synthetic = SyntheticProfile::new(true);
+    let mut synthetic = SyntheticProfile::new(true);
     let (_, synthetic_binding) = synthetic
         .recognise_intent(&intent(
             SYNTHETIC_APPLICATION,

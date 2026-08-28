@@ -801,13 +801,13 @@ fn idle_snapshot() -> Value {
 
 fn display_json(display: &DisplayIntent) -> Value {
     json!({
-        "application": display.application,
-        "action": display.action,
-        "authoritySummary": display.authority_summary,
-        "fields": display.fields.iter().map(|field| json!({
-            "label": field.label,
-            "value": field.value,
-            "claimedBySecretHolder": field.claimed_by_secret_holder
+        "application": display.application(),
+        "action": display.action(),
+        "authoritySummary": display.authority_summary(),
+        "fields": display.fields().iter().map(|field| json!({
+            "label": field.label(),
+            "value": field.value(),
+            "claimedBySecretHolder": field.claimed_by_secret_holder()
         })).collect::<Vec<_>>()
     })
 }

@@ -1,7 +1,8 @@
 //! Pure two-membership mailbox state and transition effects.
 
-use crate::wire::CloseReason;
+use crate::wire::{claim_commitment, ClaimToken, CloseReason};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 /// Default mailbox lifetime in seconds.
 pub const DEFAULT_TTL_SECONDS: u16 = 600;
@@ -9,6 +10,8 @@ pub const DEFAULT_TTL_SECONDS: u16 = 600;
 pub const MIN_TTL_SECONDS: u16 = 60;
 /// Maximum accepted mailbox lifetime in seconds.
 pub const MAX_TTL_SECONDS: u16 = 600;
+/// Exact protected credential/v2 mailbox lifetime in seconds.
+pub const V2_TTL_SECONDS: u16 = 900;
 /// Maximum frames accepted from one membership.
 pub const MAX_FRAMES_PER_MEMBERSHIP: usize = 16;
 /// Maximum opaque frame body length.
@@ -65,6 +68,21 @@ pub struct AllocationInput {
     pub ttl_seconds: Option<u16>,
 }
 
+/// Inputs for one protected credential/v2 mailbox allocation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct V2AllocationInput {
+    /// Allocator-generated direct mailbox identifier.
+    pub mailbox_id: [u8; 32],
+    /// Hash of the allocator's random membership token.
+    pub allocator_hash: MembershipHash,
+    /// Commitment to the separate claimant presence token.
+    pub claim_commitment: [u8; 32],
+    /// Explicit current Unix time in seconds.
+    pub now: u64,
+    /// Omitted or exact credential/v2 lifetime.
+    pub ttl_seconds: Option<u16>,
+}
+
 /// A recognised operation against one mailbox.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MailboxCommand {
@@ -72,6 +90,13 @@ pub enum MailboxCommand {
     Claim {
         /// Hash of the new relay-generated membership token.
         claimant_hash: MembershipHash,
+    },
+    /// Install the only credential/v2 claimant after bearer verification.
+    ClaimV2 {
+        /// Hash of the new relay-generated membership token.
+        claimant_hash: MembershipHash,
+        /// Separate human-presence claim token.
+        claim_token: ClaimToken,
     },
     /// Authenticate and resume one existing membership.
     Open {
@@ -158,6 +183,19 @@ pub enum MailboxStatus {
     Terminal(CloseReason),
 }
 
+/// Persisted admission discriminator for a v1 or protected v2 mailbox.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AdmissionSnapshot {
+    /// Legacy credential/v1 admission and crowding semantics.
+    V1,
+    /// Credential/v2 is waiting with one retained claim commitment.
+    V2Pending([u8; 32]),
+    /// Credential/v2 installed its only claimant and erased the commitment.
+    V2Claimed,
+    /// Credential/v2 reached a terminal state.
+    V2Closed,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct FrameRecord {
     seq: u8,
@@ -180,6 +218,7 @@ pub struct Mailbox {
     nameplate: Option<u32>,
     expires_at: u64,
     status: MailboxStatus,
+    admission: AdmissionSnapshot,
     allocator: MemberState,
     claimant: Option<MemberState>,
     queue_bytes: u64,
@@ -211,6 +250,8 @@ pub struct MailboxSnapshot {
     pub expires_at: u64,
     /// Waiting, paired, or terminal state.
     pub status: MailboxStatus,
+    /// Versioned admission state and pending v2 commitment.
+    pub admission: AdmissionSnapshot,
     /// Allocator hash followed by the optional claimant hash.
     pub membership_hashes: Vec<MembershipHash>,
     /// Per-membership sequence metadata and optional opaque bodies.
@@ -306,6 +347,32 @@ impl Mailbox {
             nameplate: input.nameplate,
             expires_at,
             status: MailboxStatus::Waiting,
+            admission: AdmissionSnapshot::V1,
+            allocator: MemberState {
+                hash: input.allocator_hash,
+                next_seq: 0,
+                frames: Vec::new(),
+            },
+            claimant: None,
+            queue_bytes: 0,
+        })
+    }
+
+    /// Allocate protected credential/v2 state using shell-supplied inputs.
+    pub fn allocate_v2(input: V2AllocationInput) -> Result<Self, MailboxError> {
+        if input.ttl_seconds.unwrap_or(V2_TTL_SECONDS) != V2_TTL_SECONDS {
+            return Err(MailboxError::LifetimeOutOfRange);
+        }
+        let expires_at = input
+            .now
+            .checked_add(u64::from(V2_TTL_SECONDS))
+            .ok_or(MailboxError::ExpiryOverflow)?;
+        Ok(Self {
+            mailbox_id: input.mailbox_id,
+            nameplate: None,
+            expires_at,
+            status: MailboxStatus::Waiting,
+            admission: AdmissionSnapshot::V2Pending(input.claim_commitment),
             allocator: MemberState {
                 hash: input.allocator_hash,
                 next_seq: 0,
@@ -378,6 +445,7 @@ impl Mailbox {
             nameplate: self.nameplate,
             expires_at: self.expires_at,
             status: self.status,
+            admission: self.admission.clone(),
             membership_hashes,
             sequences,
         }
@@ -399,6 +467,16 @@ impl Mailbox {
                 return Err(MailboxError::InvalidSnapshot)
             }
             _ => {}
+        }
+        match (&snapshot.admission, snapshot.status) {
+            (AdmissionSnapshot::V1, _) => {}
+            (AdmissionSnapshot::V2Pending(_), MailboxStatus::Waiting)
+                if snapshot.nameplate.is_none() && snapshot.membership_hashes.len() == 1 => {}
+            (AdmissionSnapshot::V2Claimed, MailboxStatus::Paired)
+                if snapshot.nameplate.is_none() && snapshot.membership_hashes.len() == 2 => {}
+            (AdmissionSnapshot::V2Closed, MailboxStatus::Terminal(_))
+                if snapshot.nameplate.is_none() => {}
+            _ => return Err(MailboxError::InvalidSnapshot),
         }
         let member = |owner: Membership, hash: MembershipHash| {
             let mut sequences: Vec<_> = snapshot
@@ -466,6 +544,7 @@ impl Mailbox {
             nameplate: snapshot.nameplate,
             expires_at: snapshot.expires_at,
             status: snapshot.status,
+            admission: snapshot.admission,
             allocator,
             claimant,
             queue_bytes,
@@ -526,6 +605,9 @@ impl Mailbox {
         let mut effects = Vec::new();
         self.delete_bodies(&mut effects);
         self.status = MailboxStatus::Terminal(reason);
+        if !matches!(self.admission, AdmissionSnapshot::V1) {
+            self.admission = AdmissionSnapshot::V2Closed;
+        }
         effects.push(MailboxEffect::Terminal(reason));
         MailboxTransition {
             state: Some(self),
@@ -550,6 +632,9 @@ pub fn transition(
     let mut next = state.clone();
     match command {
         MailboxCommand::Claim { claimant_hash } => {
+            if !matches!(next.admission, AdmissionSnapshot::V1) {
+                return Err(MailboxError::NotMember);
+            }
             if claimant_hash == next.allocator.hash {
                 return Err(MailboxError::MembershipCollision);
             }
@@ -574,6 +659,36 @@ pub fn transition(
                 }
                 Some(_) => Ok(next.terminate(CloseReason::Crowded)),
             }
+        }
+        MailboxCommand::ClaimV2 {
+            claimant_hash,
+            claim_token,
+        } => {
+            let expected = match &next.admission {
+                AdmissionSnapshot::V2Pending(expected) => *expected,
+                _ => return Err(MailboxError::NotMember),
+            };
+            let presented = claim_commitment(next.mailbox_id, &claim_token);
+            if !bool::from(expected.ct_eq(&presented)) {
+                return Err(MailboxError::NotMember);
+            }
+            if claimant_hash == next.allocator.hash || next.claimant.is_some() {
+                return Err(MailboxError::MembershipCollision);
+            }
+            next.claimant = Some(MemberState {
+                hash: claimant_hash,
+                next_seq: 0,
+                frames: Vec::new(),
+            });
+            next.status = MailboxStatus::Paired;
+            next.admission = AdmissionSnapshot::V2Claimed;
+            Ok(MailboxTransition {
+                state: Some(next),
+                effects: vec![MailboxEffect::Claimed {
+                    membership: Membership::Claimant,
+                    expires_at: state.expires_at,
+                }],
+            })
         }
         MailboxCommand::Open { membership_hash } => {
             let membership = next

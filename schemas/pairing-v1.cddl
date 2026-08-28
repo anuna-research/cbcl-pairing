@@ -14,7 +14,8 @@ relay-origin   = tstr .size (1..255)
 locator        = [0, mailbox-id] / [1, 0..999999999]
 mailbox-id     = bstr .size 32
 
-client-message = bind / allocate / claim / open / put / ack / close / ping
+client-message = bind / allocate / claim / allocate-v2 / claim-v2 /
+                 open / put / ack / close / ping
 
 bind = {
   "type": "bind",
@@ -30,6 +31,19 @@ allocate = {
 claim = {
   "type": "claim",
   "locator": locator
+}
+
+allocate-v2 = {
+  "type": "allocate-v2",
+  "mailbox-id": bstr .size 32,
+  "claim-commitment": bstr .size 32,
+  ? "ttl-seconds": 900
+}
+
+claim-v2 = {
+  "type": "claim-v2",
+  "mailbox-id": bstr .size 32,
+  "claim-token": bstr .size 16
 }
 
 open = {
@@ -52,8 +66,8 @@ ack = {
 close = { "type": "close" }
 ping  = { "type": "ping" }
 
-server-message = welcome / allocated / claimed / frame / acknowledged /
-                 closed / error / pong
+server-message = welcome / allocated / claimed / allocated-v2 / claimed-v2 /
+                 frame / acknowledged / closed / error / pong
 
 welcome = { "type": "welcome", "version": 1 }
 
@@ -67,6 +81,20 @@ allocated = {
 
 claimed = {
   "type": "claimed",
+  "mailbox-id": mailbox-id,
+  "membership-token": membership-token,
+  "expires-at": uint
+}
+
+allocated-v2 = {
+  "type": "allocated-v2",
+  "mailbox-id": mailbox-id,
+  "membership-token": membership-token,
+  "expires-at": uint
+}
+
+claimed-v2 = {
+  "type": "claimed-v2",
   "mailbox-id": mailbox-id,
   "membership-token": membership-token,
   "expires-at": uint

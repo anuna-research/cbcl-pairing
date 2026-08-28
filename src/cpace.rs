@@ -176,6 +176,31 @@ pub fn start(
     Ok((state, message))
 }
 
+/// Begin CPace with distinct local and expected peer associated data.
+///
+/// Versioned protocol profiles use this entry point when both role bindings
+/// are derived from one authenticated public context.
+pub fn start_bound(
+    side: Side,
+    prs: &[u8],
+    channel_identifier: &[u8],
+    session_id: &[u8],
+    local_associated_data: &[u8],
+    expected_peer_associated_data: &[u8],
+    fresh_scalar: [u8; 32],
+) -> Result<(CpaceState, CpaceMessage), CpaceError> {
+    let (mut state, message) = start(
+        side,
+        prs,
+        channel_identifier,
+        session_id,
+        local_associated_data,
+        fresh_scalar,
+    )?;
+    state.expected_peer_associated_data = Some(expected_peer_associated_data.to_vec());
+    Ok((state, message))
+}
+
 /// Begin CPace using only the normative SPEC-072 invitation context and a
 /// caller-supplied fresh scalar.
 pub fn start_pairing(
