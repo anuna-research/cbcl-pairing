@@ -183,6 +183,9 @@ fn durable_store_resumes_queue_ack_terminal_and_original_expiry() {
             body: b"opaque queued frame".to_vec()
         }]
     );
+    // An Ack command is confirmed by silence (the acknowledged echo broke
+    // every live credential/v2 ceremony); the deletion it causes is asserted
+    // by the restart below finding no queued body.
     assert_eq!(
         command(
             &mut relay,
@@ -191,7 +194,7 @@ fn durable_store_resumes_queue_ack_terminal_and_original_expiry() {
             random([0; 32], [0; 32]),
             ClientMessage::Ack { peer_seq: 0 },
         ),
-        vec![ServerMessage::Acknowledged { seq: 0 }]
+        vec![]
     );
     drop(relay);
 

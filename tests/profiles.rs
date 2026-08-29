@@ -212,7 +212,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/relay.rs")).as_slice(),
-            "4fc306940ea57585b142967b3a387bcd6507e735ce223791184e9814c7c356eb",
+            "87fc2d2dcd4e206d610ee4ece630b6d3bdf411967265a549093c49754eb68000",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/limiter.rs")).as_slice(),

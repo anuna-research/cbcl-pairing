@@ -233,16 +233,19 @@ fn queued_delivery_ack_reconnect_crowding_and_expiry_use_only_mailbox_semantics(
             },
         ]
     );
-    assert_eq!(
+    // An Ack command is confirmed by silence: the `acknowledged` message is
+    // reserved for the sender's own stored Put, and echoing it here is what
+    // broke every live credential/v2 ceremony with a Counter refusal.
+    assert!(
         handle(
             &mut relay,
             3,
             1_008,
             randomness(0, 0, 0),
             ClientMessage::Ack { peer_seq: 0 },
-        )[0]
-        .message,
-        ServerMessage::Acknowledged { seq: 0 }
+        )
+        .is_empty(),
+        "an Ack command must produce no acknowledged echo"
     );
 
     // A third distinct claim crowds the mailbox and notifies both live peers

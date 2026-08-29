@@ -468,9 +468,15 @@ fn route_frame(
             body: body.clone(),
         }
     );
+    // An Ack is confirmed by silence: a Ping immediately after must answer
+    // Pong as the very NEXT message, proving no `acknowledged` echo was
+    // queued between (the echo is what broke every credential/v2 ceremony —
+    // both client cores read it as an out-of-sequence Put acknowledgement).
+    receiver.send(&ClientMessage::Ack { peer_seq: seq });
     assert_eq!(
-        receiver.roundtrip(&ClientMessage::Ack { peer_seq: seq }),
-        ServerMessage::Acknowledged { seq }
+        receiver.roundtrip(&ClientMessage::Ping),
+        ServerMessage::Pong,
+        "an Ack command must produce no acknowledged echo"
     );
     decode_channel_frame(&body).expect("routed channel frame")
 }
