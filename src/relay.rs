@@ -725,11 +725,16 @@ impl RelayService {
                     ));
                 }
             }
-            MailboxCommandKind::Ack { peer_seq } => messages.push(route(
-                connection,
-                ServerMessage::Acknowledged { seq: *peer_seq },
-            )),
-            MailboxCommandKind::Close => {}
+            // An Ack command is CONFIRMED BY SILENCE, never echoed. The
+            // `acknowledged` message means exactly one thing to every client
+            // core: "your own stored Put at this sequence is delivered".
+            // Echoing the peer-directed Ack back reused that meaning for a
+            // different fact, and both credential/v2 cores treated the echo as
+            // an out-of-sequence Put acknowledgement — an exact-next Counter
+            // refusal that killed every live ceremony at the first sealed
+            // exchange. SPEC-007 clients ignore every `acknowledged`
+            // unconditionally, so nothing consumes the echo.
+            MailboxCommandKind::Ack { .. } | MailboxCommandKind::Close => {}
         }
         for effect in &transition.effects {
             match effect {
