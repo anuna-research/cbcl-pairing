@@ -1,11 +1,12 @@
-/target/
-/fuzz/target/
-/fuzz/artifacts/
-/fuzz/corpus/
+
+.DS_Store
+*.profraw
 /.idea/
 /.vscode/
-*.profraw
-
-# cargo-mutants sweep output (regenerate with tools/run-mutant-sweep.sh)
-/mutants.out/
+/fuzz/artifacts/
+/fuzz/corpus/
+/fuzz/target/
 /mutants.out.old/
+/mutants.out/
+/target/
+# cargo-mutants sweep output (regenerate with tools/run-mutant-sweep.sh)
