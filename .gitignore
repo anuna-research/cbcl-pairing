@@ -1,12 +1,14 @@
-
-.DS_Store
-*.profraw
-/.idea/
-/.vscode/
+/target/
+/fuzz/target/
 /fuzz/artifacts/
 /fuzz/corpus/
-/fuzz/target/
-/mutants.out.old/
-/mutants.out/
-/target/
+/.idea/
+/.vscode/
+*.profraw
+
 # cargo-mutants sweep output (regenerate with tools/run-mutant-sweep.sh)
+/mutants.out/
+/mutants.out.old/
+
+# macOS Finder metadata
+.DS_Store
