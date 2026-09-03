@@ -421,6 +421,15 @@ impl CredentialV2Endpoint {
         self.phase = CredentialV2Phase::Terminal;
         Err(error)
     }
+
+    /// Whether this endpoint's last accepted object is the allocator's own
+    /// Receipt: the one Terminal state a checkpoint may still record.
+    pub(super) fn receipt_released(&self) -> bool {
+        self.side == Side::Allocator
+            && self.last.as_ref().is_some_and(|last| {
+                last.sender == Side::Allocator && last.kind == CredentialV2Kind::Receipt
+            })
+    }
 }
 
 fn recognise_logical_body(
