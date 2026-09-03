@@ -618,7 +618,10 @@ fn allocator_restores_the_bound_membership_and_only_the_cached_frame() {
 // fails with `CredentialV2Error::Terminal` on every live ceremony.
 // ---------------------------------------------------------------------------
 
-fn fixture_successor(kind: CredentialV2Kind, predecessor: &CredentialV2Object) -> CredentialV2Object {
+fn fixture_successor(
+    kind: CredentialV2Kind,
+    predecessor: &CredentialV2Object,
+) -> CredentialV2Object {
     let body = cbor2::to_canonical_vec(&ciborium::Value::Map(vec![
         (
             ciborium::Value::Text("carrierCeremonyId".into()),
@@ -679,7 +682,11 @@ fn established_allocator() -> (
     let mut allocator = CredentialV2AllocatorSession::new(input(), Box::new(AcceptBodies)).unwrap();
     allocator.start().unwrap();
     allocator
-        .receive(&server(ServerMessage::Welcome), NOW, CredentialV2CheckpointNonce::from_csprng([0x61; 12]))
+        .receive(
+            &server(ServerMessage::Welcome),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x61; 12]),
+        )
         .unwrap();
     let carrier_bytes = one_checkpoint(
         allocator
@@ -718,24 +725,40 @@ fn established_allocator() -> (
         2,
     );
     let share_commands = sent(&allocator.checkpoint_persisted(2).unwrap());
-    let ClientMessage::Put { seq: 0, body: allocator_share } = &share_commands[1] else {
+    let ClientMessage::Put {
+        seq: 0,
+        body: allocator_share,
+    } = &share_commands[1]
+    else {
         panic!("allocator share is exact relay sequence zero")
     };
     let allocator_share = decode_frame(allocator_share).unwrap();
 
     one_checkpoint(
         allocator
-            .receive(&server(ServerMessage::Acknowledged { seq: 0 }), NOW, CredentialV2CheckpointNonce::from_csprng([0x65; 12]))
+            .receive(
+                &server(ServerMessage::Acknowledged { seq: 0 }),
+                NOW,
+                CredentialV2CheckpointNonce::from_csprng([0x65; 12]),
+            )
             .unwrap(),
         3,
     );
     let finished_commands = sent(&allocator.checkpoint_persisted(3).unwrap());
-    let ClientMessage::Put { seq: 1, body: allocator_finished } = &finished_commands[0] else {
+    let ClientMessage::Put {
+        seq: 1,
+        body: allocator_finished,
+    } = &finished_commands[0]
+    else {
         panic!("allocator Finished is exact relay sequence one")
     };
     let allocator_finished = decode_frame(allocator_finished).unwrap();
 
-    let claimant_isk = cpace::finish(claimant_state, allocator_share.cpace_message().expect("allocator CPace")).unwrap();
+    let claimant_isk = cpace::finish(
+        claimant_state,
+        allocator_share.cpace_message().expect("allocator CPace"),
+    )
+    .unwrap();
     let claimant_pending = PendingCredentialV2Channel::new(
         Side::Claimant,
         claimant_isk,
@@ -749,7 +772,11 @@ fn established_allocator() -> (
 
     one_checkpoint(
         allocator
-            .receive(&server(ServerMessage::Acknowledged { seq: 1 }), NOW, CredentialV2CheckpointNonce::from_csprng([0x66; 12]))
+            .receive(
+                &server(ServerMessage::Acknowledged { seq: 1 }),
+                NOW,
+                CredentialV2CheckpointNonce::from_csprng([0x66; 12]),
+            )
             .unwrap(),
         4,
     );
@@ -770,7 +797,10 @@ fn established_allocator() -> (
     let established = allocator.checkpoint_persisted(5).unwrap();
     assert!(matches!(
         established.as_slice(),
-        [CredentialV2AllocatorEffect::Send(_), CredentialV2AllocatorEffect::Established { .. }]
+        [
+            CredentialV2AllocatorEffect::Send(_),
+            CredentialV2AllocatorEffect::Established { .. }
+        ]
     ));
     (allocator, claimant_channel, 6)
 }
@@ -786,12 +816,18 @@ fn release(
 ) -> u64 {
     one_checkpoint(
         allocator
-            .prepare_application_object(object, NOW, CredentialV2CheckpointNonce::from_csprng([nonce; 12]))
+            .prepare_application_object(
+                object,
+                NOW,
+                CredentialV2CheckpointNonce::from_csprng([nonce; 12]),
+            )
             .unwrap(),
         generation,
     );
     let commands = sent(&allocator.checkpoint_persisted(generation).unwrap());
-    assert!(matches!(commands.as_slice(), [ClientMessage::Put { seq: actual, .. }] if *actual == seq));
+    assert!(
+        matches!(commands.as_slice(), [ClientMessage::Put { seq: actual, .. }] if *actual == seq)
+    );
     one_checkpoint(
         allocator
             .receive(
@@ -802,7 +838,10 @@ fn release(
             .unwrap(),
         generation + 1,
     );
-    assert!(allocator.checkpoint_persisted(generation + 1).unwrap().is_empty());
+    assert!(allocator
+        .checkpoint_persisted(generation + 1)
+        .unwrap()
+        .is_empty());
     generation + 2
 }
 
@@ -846,15 +885,43 @@ fn allocator_releases_the_receipt_after_the_payload() {
     let offer = CredentialV2Object::new(CredentialV2Kind::Offer, [0x51; 32], vec![0xa0]).unwrap();
     let generation = release(&mut allocator, &offer, 2, generation, 0x70);
     let intent_approve = fixture_successor(CredentialV2Kind::IntentApprove, &offer);
-    let generation = deliver(&mut allocator, &mut claimant_channel, &intent_approve, 2, generation, 0x72);
+    let generation = deliver(
+        &mut allocator,
+        &mut claimant_channel,
+        &intent_approve,
+        2,
+        generation,
+        0x72,
+    );
     let preparation = fixture_successor(CredentialV2Kind::Preparation, &intent_approve);
-    let generation = deliver(&mut allocator, &mut claimant_channel, &preparation, 3, generation, 0x73);
+    let generation = deliver(
+        &mut allocator,
+        &mut claimant_channel,
+        &preparation,
+        3,
+        generation,
+        0x73,
+    );
     let comparison = fixture_successor(CredentialV2Kind::ComparisonConfirmed, &preparation);
     let generation = release(&mut allocator, &comparison, 3, generation, 0x74);
     let final_approve = fixture_successor(CredentialV2Kind::FinalApprove, &comparison);
-    let generation = deliver(&mut allocator, &mut claimant_channel, &final_approve, 4, generation, 0x76);
+    let generation = deliver(
+        &mut allocator,
+        &mut claimant_channel,
+        &final_approve,
+        4,
+        generation,
+        0x76,
+    );
     let payload = fixture_successor(CredentialV2Kind::Payload, &final_approve);
-    let generation = deliver(&mut allocator, &mut claimant_channel, &payload, 5, generation, 0x77);
+    let generation = deliver(
+        &mut allocator,
+        &mut claimant_channel,
+        &payload,
+        5,
+        generation,
+        0x77,
+    );
     assert_eq!(
         allocator.endpoint_phase(),
         Some(cbcl_pairing::credential_v2::CredentialV2Phase::PayloadSent)
@@ -871,7 +938,64 @@ fn allocator_releases_the_receipt_after_the_payload() {
     let effects = released.unwrap_or_else(|error| {
         panic!("the allocator refused to release its Receipt after the Payload: {error:?}")
     });
-    one_checkpoint(effects, generation);
+    let [CredentialV2AllocatorEffect::Checkpoint {
+        generation: receipt_generation,
+        checkpoint: receipt_checkpoint,
+        carrier: receipt_carrier,
+    }] = effects.as_slice()
+    else {
+        panic!("the Receipt must be withheld behind its checkpoint: {effects:?}")
+    };
+    assert_eq!(*receipt_generation, generation);
     let commands = sent(&allocator.checkpoint_persisted(generation).unwrap());
-    assert!(matches!(commands.as_slice(), [ClientMessage::Put { seq: 4, .. }]));
+    let [ClientMessage::Put {
+        seq: 4,
+        body: receipt_frame,
+    }] = commands.as_slice()
+    else {
+        panic!("the Receipt is exact relay sequence four: {commands:?}")
+    };
+    assert_eq!(
+        allocator.endpoint_phase(),
+        Some(cbcl_pairing::credential_v2::CredentialV2Phase::Terminal)
+    );
+
+    // A restart between the checkpoint and the relay's acknowledgement must
+    // resend exactly the cached Receipt, like every other cached frame.
+    assert_restored_reopens_cached_bootstrap_frame(
+        receipt_checkpoint.as_bytes(),
+        receipt_carrier,
+        generation,
+        4,
+        receipt_frame,
+        [0x79; 12],
+    );
+
+    // The acknowledgement's own checkpoint is the last one: the endpoint is
+    // Terminal with its Receipt delivered, and a restart reopens nothing.
+    let acknowledged = allocator
+        .receive(
+            &server(ServerMessage::Acknowledged { seq: 4 }),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x7a; 12]),
+        )
+        .unwrap();
+    let [CredentialV2AllocatorEffect::Checkpoint {
+        checkpoint: final_checkpoint,
+        carrier: final_carrier,
+        ..
+    }] = acknowledged.as_slice()
+    else {
+        panic!("the Receipt acknowledgement must still be checkpointed: {acknowledged:?}")
+    };
+    assert!(allocator
+        .checkpoint_persisted(generation + 1)
+        .unwrap()
+        .is_empty());
+    assert_restored_reopens_acknowledged_bootstrap_frame(
+        final_checkpoint.as_bytes(),
+        final_carrier,
+        generation + 1,
+        [0x7b; 12],
+    );
 }

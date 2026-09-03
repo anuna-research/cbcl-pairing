@@ -665,6 +665,12 @@ fn consistent_projection(
         (CredentialV2Phase::PayloadSent, Some(intent), Some(last)) => {
             last_kind(last) == Some((CredentialV2Kind::Payload, intent))
         }
+        // The one checkpointable Terminal: the allocator has released its own
+        // Receipt and may still have to retransmit it after a restart.
+        (CredentialV2Phase::Terminal, Some(intent), Some(last)) => {
+            last.sender == Side::Allocator
+                && last_kind(last) == Some((CredentialV2Kind::Receipt, intent))
+        }
         _ => false,
     }
 }
