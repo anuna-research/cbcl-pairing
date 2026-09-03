@@ -195,6 +195,7 @@ impl CredentialV2Endpoint {
         validate_checkpoint_phase(
             self.side,
             self.phase,
+            self.receipt_released(),
             expiry,
             self.carrier.relay_expires_at(),
             now,
@@ -251,6 +252,7 @@ impl CredentialV2Endpoint {
         validate_checkpoint_phase(
             endpoint.side,
             endpoint.phase,
+            endpoint.receipt_released(),
             opened.expiry,
             endpoint.carrier.relay_expires_at(),
             now,
@@ -674,11 +676,16 @@ fn last_kind(last: &super::endpoint::LastObject) -> Option<(CredentialV2Kind, [u
 fn validate_checkpoint_phase(
     side: Side,
     phase: CredentialV2Phase,
+    receipt_released: bool,
     expiry: Option<u64>,
     carrier_expiry: u64,
     now: u64,
 ) -> Result<(), CredentialV2Error> {
-    if phase == CredentialV2Phase::Terminal {
+    // The allocator's Receipt is the `PayloadSent -> Terminal` edge, and it is
+    // released behind a checkpoint like every other frame: a Terminal
+    // allocator whose last object is its own Receipt is checkpointable. Every
+    // other Terminal endpoint reached that phase through a failure.
+    if phase == CredentialV2Phase::Terminal && !(side == Side::Allocator && receipt_released) {
         return Err(CredentialV2Error::Terminal);
     }
     match side {
