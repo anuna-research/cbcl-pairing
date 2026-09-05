@@ -4,7 +4,7 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.9-draft
+version: 0.5.10-draft
 last-updated: 2026-09-05
 owner-repo: cbcl-pairing
 implementation-status: credential-v1-local-complete; credential-v2-local-complete
@@ -14,9 +14,9 @@ derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574ed
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
 authority-form: consolidated-current-protocol-and-consumer-pointer
-consumer-design: selfsame SPEC-008 0.5.18-draft
-coordinated-safety-design: selfsame SPEC-007 0.3.9-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.14-draft
+consumer-design: selfsame SPEC-008 0.5.19-draft
+coordinated-safety-design: selfsame SPEC-007 0.3.10-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.15-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
@@ -1495,12 +1495,24 @@ attempt, without granting account or identity authority. It never becomes the
 public carrier, public digest, relay member, or unsealed persistent state.
 The original public carrier language, CPace inputs, and relay wire stay identical.
 
+Explicit manual entry follows cbcl-bus SPEC-078 0.1.1 CON-001/002.
+Its confidential `SSPAIR-M1:` bootstrap contains only the public carrier and T.
+Three English words encode 30 uniformly random bits and three checksum bits.
+Only the pinned word-list mapping supplies the sixteen-octet C; the bootstrap
+and public carrier contain no C verifier. Complete bounded recognition of both
+inputs precedes effects. Full and legacy exporters refuse Manual mode, and
+manual export refuses Full. Input failure never selects another recognizer.
+
 Only `C` enters CPace. Only `T` authenticates the claimant mailbox admission.
 The carrier and presence input cannot substitute for each other.
 
 The allocator SHALL generate one fresh 32-octet mailbox identifier `M`. It
 SHALL also generate a fresh 32-octet `carrierCeremonyId`. It SHALL generate
-fresh independent `C` and `T` values for each ceremony.
+fresh independent `C` and `T` values for each ceremony. Full mode uses uniform
+128-bit C. Manual mode uses SPEC-078's 30-bit mapping, independent of uniform
+128-bit T. CON-030 preserves one peer-bound online attempt across restoration.
+Each fresh manual invitation adds another attempt; only the per-invitation
+bound and the ordinary union bound across invitations are claimed.
 
 The carrier ceremony ID is the sole credential/v2 ceremony identifier. The
 hub, both endpoints, every envelope, the authenticated display authority, and
@@ -1846,11 +1858,20 @@ origin. It SHALL also expose the carrier ceremony ID, account provenance,
 permissions, device binding, exact-pair TOFU state, transition, and signed
 offer-core digest.
 
+The typed contact provenance distinguishes ceremony gesture from legacy new-pair
+approval and legacy remembered trust. Ceremony gesture is never displayed as
+remembered trust. This consumer-owned field changes no application wire object.
+Selfsame's default complete entry follows cbcl-bus SPEC-079 0.1.1: unlock permits
+only local preview, and one person Link creates bounded conditional authority.
+The protocol retains distinct IntentApprove and FinalApprove objects, with
+authenticated desktop comparison between them. Explicit legacy entry retains
+both person decisions and its exact-pair trust policy.
+
 For the Selfsame profile, `CredentialV2IntentInput` is constructed only from
-the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.14-draft
+the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.15-draft
 CON-012's `signed-offer-v2` and its exact `OfferCoreV2`. The other ten body
 kinds cannot construct or amend an intent input. The consumer's nine successor
-body grammars are Selfsame SPEC-008 0.5.18-draft CON-987.
+body grammars are Selfsame SPEC-008 0.5.19-draft CON-987.
 
 The profile first parses one bounded peer `CredentialV2IntentInput`. Before any
 display allocation, it SHALL require byte equality between every overlapping
@@ -1959,6 +1980,20 @@ It contains no consumer key, derived application key, issuer key, or grant key.
 An allocator checkpoint before Finished MAY contain its live `C` and `T`.
 The first checkpoint after claimant admission erases `T`. The first checkpoint
 after both Finished values erases `C`. No claimant checkpoint contains either.
+
+Allocator bootstrap mode follows cbcl-bus SPEC-078 0.1.1 CON-003. The authenticated
+inner tag is `UTF8("cbcl-pairing allocator bootstrap/v3") || mode-octet`, with
+00 for Full and 01 for Manual. The old bootstrap/v2 tag restores Full only.
+Outer v2 grammar, key derivation, AAD and established/claimant schemas remain
+unchanged. Mode is never inferred from C. Established state has no transfer
+export and cannot return to bootstrap.
+
+The first accepted peer CPace share pins the exact share, scalar and cached
+reply in the checkpoint before acknowledgement or response output. Any different
+share terminates without another distinct peer-bound response. Restoration before a peer
+share requires a fresh shell-supplied CSPRNG scalar; it never uses a zero default.
+Restoration after binding uses only the retained scalar and exact cached reply.
+Consumer ownership and persistence enforce this budget even if the relay lies.
 
 The library recognizer SHALL require complete deterministic-CBOR decoding and
 the exact outer bindings. It SHALL require a strictly positive generation. The
@@ -2179,6 +2214,11 @@ application and transition value comes from authenticated typed input.
 Construct every room-symbol branch and 256 distinct maximum rooms. Require the
 33,793-octet array and exact borrowed accessors.
 
+Exercise every contact provenance. Require ceremony contact to remain distinct
+from both legacy trust states without peer-supplied display fields. The consumer
+tests local preview without approval and conditional Link without skipping
+authenticated comparison; protocol decision kinds remain unchanged.
+
 ### TEST-063: Compatibility, bounds, and current authority are singular
 
 Re-run every base TEST-001 through TEST-029 outcome. Credential/v1 bytes,
@@ -2198,12 +2238,16 @@ permuted kind assignment, or an integer outside its arm refuses.
 Require one current credential/v2 protocol section, one current consumer
 pointer, one current hub pointer, and one current test set.
 
+Run SPEC-078's exact manual word/bootstrap vectors and word-list hash. Full and
+legacy transfer bytes remain compatible. Test cross-mode exporter and parser
+refusal, including a random Full C with the manual mapping prefix.
+
 The current test set contains TEST-001 through TEST-029 and TEST-060 through
 TEST-067. No trajectory test supplies current authority.
 
-The current consumer is Selfsame SPEC-008 0.5.18-draft. The current safety
-authority is Selfsame SPEC-007 0.3.9-draft. The current hub design is cbcl-bus
-SPEC-053 0.17.14-draft.
+The current consumer is Selfsame SPEC-008 0.5.19-draft. The current safety
+authority is Selfsame SPEC-007 0.3.10-draft. The current hub design is cbcl-bus
+SPEC-053 0.17.15-draft.
 
 All four coordinated parents record the same generation metadata and review
 set.
@@ -2216,6 +2260,10 @@ test-first implementation before PASS. It authorizes no production allocation,
 release, or deployment. Those actions retain every production gate below.
 
 ### TEST-064: One carrier ceremony identifier governs every v2 binding
+
+Repeat the binding mutations through both Full and Manual bootstrap admission.
+The manual words supply only C; no alternate ceremony identifier, public context
+member or additional authority enters the application protocol.
 
 **Validates:** [[SPEC-001-reusable-blind-pairing#REQ-031]],
 [[SPEC-001-reusable-blind-pairing#CON-027]], and
@@ -2280,6 +2328,12 @@ only after that send. Cross relay expiry in both roles. Require allocator
 checkpoint expiry and browser-owned status recovery. Require claimant retention
 until ordinary or recovered receipt, explicit unlink, or root-lifecycle purge.
 
+For Manual bootstrap, crash around first-share persistence, acknowledgement and
+response. Require only one pinned peer share and byte-identical cached replay.
+Mutate the sealed mode and require refusal. Old bootstrap checkpoints restore
+Full only. Restore before first share with independent supplied random scalars;
+require use of the supplied scalar, with no implicit constant or second attempt.
+
 Inspect checkpoints, logs, errors, traces, heap retention, and terminal erasure.
 No wrapping key, presence token, application key, issuer key, or grant key
 survives outside its declared boundary.
@@ -2297,6 +2351,11 @@ also reproduce exact AAD bytes, sealed frames, content hashes, and predecessors.
 They assign the eleven object kinds exactly to integers 0 through 10.
 They also reproduce the exact checkpoint-key info, extract, expand, and
 32-octet output for both endpoint roles.
+
+Extend those independent vectors with SPEC-078's phrase-to-C mapping, its exact
+word-list digest, boundary n values and checksum branches. Derive both CPace
+shares and Finished values from that C under the unchanged public context.
+No mode, phrase checksum or password verifier enters the public context.
 
 Exercise counters zero, one, 255, 256, the largest unsigned 64-bit value, and
 exhaustion. Mutate one public-context position, nullable key, role, label byte,
@@ -2402,7 +2461,7 @@ required Tier-1 review.
 - The reference relay shells do not terminate TLS or export metrics.
 - This draft does not claim formal cryptographic proof or production approval.
 
-## Scan-handoff local implementation evidence — 0.5.9-draft
+## Scan-handoff local implementation evidence — 0.5.10-draft
 
 The owner authorized local implementation on 2026-09-05. The coordinated
 application contract is cbcl-bus SPEC-077 0.1.1, with Selfsame SPEC-008 0.5.18,
@@ -2417,9 +2476,9 @@ explicit legacy input retain their encodings; old clients cannot consume SSPAIR1
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.5.9-draft</summary>
+<summary>Revision history — 0.1.0 → 0.5.10-draft</summary>
 
-- 0.5.9-draft — specifies a confidential local scan handoff around the unchanged public carrier, with explicit disclosure policy, bounds and recognition evidence. Local implementation is authorized; production gates remain effective.
+- 0.5.10-draft — specifies a confidential local scan handoff around the unchanged public carrier, with explicit disclosure policy, bounds and recognition evidence. Local implementation is authorized; production gates remain effective.
 
 - 0.5.8-draft — reissues the unchanged credential/v2 protocol against the
   coordinated Selfsame 0.5.17, safety 0.3.8, and hub 0.17.13 authorities. The
