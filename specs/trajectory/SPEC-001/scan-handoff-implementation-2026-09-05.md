@@ -1,4 +1,5 @@
 ---
+id: scan-handoff-implementation-2026-09-05
 title: Shared confidential handoff implementation evidence
 mode: reference
 date: 2026-09-05
@@ -7,7 +8,7 @@ branch: circus/scan-handoff/2
 baseline: b703e31ea3d83a74e460fde90a9cf7f33cb6e0d0
 generation-model: OpenAI GPT-6 / Codex
 review-owner: root
-status: local implementation complete; independent acceptance pending
+status: independently reviewed and locally integrated
 ---
 
 # Shared confidential handoff implementation evidence
@@ -224,4 +225,14 @@ gate rows   0  (pass=0 fail=0 unverified=0)
 wikilinks   4  (anchored=4)
 ```
 
-Independent semantic review, Circus acceptance and integration remain root's next actions.
+Root reviewed the recognizer, commitment, bounded storage, session lifetime and
+negative tests, then independently reran the focused command above: all 17 tests
+passed. Circus retained that verifier log, accepted the attempt and merged it as
+`87b9bbbdeab4`. The temporary RAM disk was no longer mounted during this check;
+the successful rerun used the external development target directory. The earlier
+missing-directory error is infrastructure evidence only.
+
+The integrating manifest explicitly enables zeroize's `derive` feature because
+the presence type now directly uses its derive macros. This avoids relying on a
+transitive dependency to enable that feature. The manifest fingerprint was
+updated for this declared dependency requirement; relay fingerprints are unchanged.
