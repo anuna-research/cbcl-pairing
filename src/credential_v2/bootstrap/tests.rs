@@ -45,14 +45,32 @@ fn restore(
     bytes: &[u8],
     mode: CredentialV2AllocatorMode,
 ) -> Result<CredentialV2AllocatorBootstrap, CredentialV2Error> {
-    let restored = CredentialV2AllocatorBootstrap::restore_checkpoint(bytes, &KEY, &s.carrier, 1, NOW, mode);
+    let restored =
+        CredentialV2AllocatorBootstrap::restore_checkpoint(bytes, &KEY, &s.carrier, 1, NOW, mode);
     let inspected = super::super::CredentialV2AllocatorCheckpointInspection::inspect(
-        bytes, &KEY, &s.carrier, 1, *s.profile_digest(), NOW + 901, mode, Box::new(NoInspectionBodies),
+        bytes,
+        &KEY,
+        &s.carrier,
+        1,
+        *s.profile_digest(),
+        NOW + 901,
+        mode,
+        Box::new(NoInspectionBodies),
     );
-    assert_eq!(inspected.is_ok(), restored.is_ok(), "inspection retains every inner-state/old-mode check");
+    assert_eq!(
+        inspected.is_ok(),
+        restored.is_ok(),
+        "inspection retains every inner-state/old-mode check"
+    );
     if let Ok(view) = inspected {
-        assert_eq!(view.bootstrap_phase(), Some(restored.as_ref().unwrap().phase()));
-        assert_eq!(view.bootstrap_mode(), Some(restored.as_ref().unwrap().mode()));
+        assert_eq!(
+            view.bootstrap_phase(),
+            Some(restored.as_ref().unwrap().phase())
+        );
+        assert_eq!(
+            view.bootstrap_mode(),
+            Some(restored.as_ref().unwrap().mode())
+        );
     }
     restored
 }
@@ -60,7 +78,10 @@ fn restore(
 #[derive(Debug)]
 struct NoInspectionBodies;
 impl super::super::CredentialV2BodyVerifier for NoInspectionBodies {
-    fn verify(&mut self, _: &super::super::CredentialV2LogicalBody<'_>) -> Result<(), CredentialV2Error> {
+    fn verify(
+        &mut self,
+        _: &super::super::CredentialV2LogicalBody<'_>,
+    ) -> Result<(), CredentialV2Error> {
         Err(CredentialV2Error::Phase)
     }
 }
@@ -68,14 +89,34 @@ impl super::super::CredentialV2BodyVerifier for NoInspectionBodies {
 #[test]
 fn closure_inspection_rejects_authenticated_outer_expiry_shape_substitution() {
     use super::super::CredentialV2AllocatorCheckpointInspection as Inspection;
-    for mode in [CredentialV2AllocatorMode::Full, CredentialV2AllocatorMode::Manual] {
+    for mode in [
+        CredentialV2AllocatorMode::Full,
+        CredentialV2AllocatorMode::Manual,
+    ] {
         let s = bootstrap(mode);
         let plaintext = s.encode_inner(1, [0x42; 12]).unwrap();
         for expiry in [None, Some(NOW + 899), Some(NOW + 901)] {
-            let sealed = seal_checkpoint_plaintext(&plaintext, Side::Allocator, &s.carrier,
-                &KEY, 1, expiry, [0x42; 12]).unwrap();
-            assert!(Inspection::inspect(sealed.as_bytes(), &KEY, &s.carrier, 1,
-                *s.profile_digest(), u64::MAX, mode, Box::new(NoInspectionBodies)).is_err());
+            let sealed = seal_checkpoint_plaintext(
+                &plaintext,
+                Side::Allocator,
+                &s.carrier,
+                &KEY,
+                1,
+                expiry,
+                [0x42; 12],
+            )
+            .unwrap();
+            assert!(Inspection::inspect(
+                sealed.as_bytes(),
+                &KEY,
+                &s.carrier,
+                1,
+                *s.profile_digest(),
+                u64::MAX,
+                mode,
+                Box::new(NoInspectionBodies)
+            )
+            .is_err());
         }
     }
 }

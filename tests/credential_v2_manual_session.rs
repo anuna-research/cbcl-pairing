@@ -389,8 +389,8 @@ fn checksum_valid_wrong_phrase_fails_both_finished_values_without_application_ef
 #[test]
 fn closure_inspection_authenticates_expired_bootstrap_without_live_authority() {
     use cbcl_pairing::credential_v2::{
-        CredentialV2AllocatorCheckpointInspection as Inspection,
         CredentialV2AllocatorBootstrapPhase as Phase,
+        CredentialV2AllocatorCheckpointInspection as Inspection,
     };
     for mode in [Mode::Full, Mode::Manual] {
         let (mut live, allocated, carrier) = allocate(mode);
@@ -398,11 +398,21 @@ fn closure_inspection_authenticates_expired_bootstrap_without_live_authority() {
         let pending = receive(&mut live, frame(&peer), 0x51).unwrap();
         let (bound, _) = checkpoint(&pending, 2);
         for (sealed, generation, phase) in [
-            (&allocated, 1, Phase::Allocated), (&bound, 2, Phase::ShareSent),
+            (&allocated, 1, Phase::Allocated),
+            (&bound, 2, Phase::ShareSent),
         ] {
             for now in [NOW, NOW + 899, NOW + 900, NOW + 901, u64::MAX] {
-                let view = Inspection::inspect(sealed, &KEY, &carrier, generation, PD, now,
-                    mode, Box::new(NoBodies)).unwrap();
+                let view = Inspection::inspect(
+                    sealed,
+                    &KEY,
+                    &carrier,
+                    generation,
+                    PD,
+                    now,
+                    mode,
+                    Box::new(NoBodies),
+                )
+                .unwrap();
                 assert_eq!(view.bootstrap_mode(), Some(mode));
                 assert_eq!(view.bootstrap_phase(), Some(phase));
                 assert_eq!(view.endpoint_phase(), None);
@@ -410,26 +420,58 @@ fn closure_inspection_authenticates_expired_bootstrap_without_live_authority() {
                 assert_eq!(view.receipt_recovery_commitment(), None);
                 assert!(view.last_received_object().is_none());
                 assert_eq!(view.is_expired(), now >= NOW + 900);
-                assert_eq!(format!("{view:?}"), "CredentialV2AllocatorCheckpointInspection([REDACTED])");
-                let restored = Session::restore(sealed, &KEY, carrier.clone(), generation, PD,
-                    now, mode, [0x61; 32], Box::new(NoBodies));
-                assert_eq!(restored.is_ok(), now < NOW + 900, "inspection cannot alter live expiry");
+                assert_eq!(
+                    format!("{view:?}"),
+                    "CredentialV2AllocatorCheckpointInspection([REDACTED])"
+                );
+                let restored = Session::restore(
+                    sealed,
+                    &KEY,
+                    carrier.clone(),
+                    generation,
+                    PD,
+                    now,
+                    mode,
+                    [0x61; 32],
+                    Box::new(NoBodies),
+                );
+                assert_eq!(
+                    restored.is_ok(),
+                    now < NOW + 900,
+                    "inspection cannot alter live expiry"
+                );
             }
-            let other = if mode == Mode::Full { Mode::Manual } else { Mode::Full };
+            let other = if mode == Mode::Full {
+                Mode::Manual
+            } else {
+                Mode::Full
+            };
             for (key, profile, gen, expected_mode) in [
                 ([0xff; 32], PD, generation, mode),
                 (KEY, [0xff; 32], generation, mode),
-                (KEY, PD, 0, mode), (KEY, PD, generation + 1, mode),
+                (KEY, PD, 0, mode),
+                (KEY, PD, generation + 1, mode),
                 (KEY, PD, generation, other),
             ] {
-                assert!(Inspection::inspect(sealed, &key, &carrier, gen, profile, NOW + 901,
-                    expected_mode, Box::new(NoBodies)).is_err());
+                assert!(Inspection::inspect(
+                    sealed,
+                    &key,
+                    &carrier,
+                    gen,
+                    profile,
+                    NOW + 901,
+                    expected_mode,
+                    Box::new(NoBodies)
+                )
+                .is_err());
             }
             let template = cbcl_pairing::credential_v2::CredentialV2CarrierInput {
                 application_context: carrier.application_context().into(),
-                relay_origin: carrier.relay_origin().into(), mailbox_id: *carrier.mailbox_id(),
+                relay_origin: carrier.relay_origin().into(),
+                mailbox_id: *carrier.mailbox_id(),
                 carrier_ceremony_id: *carrier.carrier_ceremony_id(),
-                carrier_nonce: *carrier.carrier_nonce(), claim_commitment: *carrier.claim_commitment(),
+                carrier_nonce: *carrier.carrier_nonce(),
+                claim_commitment: *carrier.claim_commitment(),
                 relay_expires_at: carrier.relay_expires_at(),
                 expected_allocator_key: carrier.expected_allocator_key().copied(),
             };
@@ -446,17 +488,47 @@ fn closure_inspection_authenticates_expired_bootstrap_without_live_authority() {
                     _ => wrong.expected_allocator_key.as_mut().unwrap()[0] ^= 1,
                 }
                 let wrong = CredentialV2Carrier::new(wrong).unwrap();
-                assert!(Inspection::inspect(sealed, &KEY, &wrong, generation, PD,
-                    NOW + 901, mode, Box::new(NoBodies)).is_err(), "carrier field {field}");
+                assert!(
+                    Inspection::inspect(
+                        sealed,
+                        &KEY,
+                        &wrong,
+                        generation,
+                        PD,
+                        NOW + 901,
+                        mode,
+                        Box::new(NoBodies)
+                    )
+                    .is_err(),
+                    "carrier field {field}"
+                );
             }
             for length in [0, 1, sealed.len() / 2, sealed.len() - 1] {
-                assert!(Inspection::inspect(&sealed[..length], &KEY, &carrier, generation, PD,
-                    NOW + 901, mode, Box::new(NoBodies)).is_err());
+                assert!(Inspection::inspect(
+                    &sealed[..length],
+                    &KEY,
+                    &carrier,
+                    generation,
+                    PD,
+                    NOW + 901,
+                    mode,
+                    Box::new(NoBodies)
+                )
+                .is_err());
             }
             let mut tampered = sealed.clone();
             *tampered.last_mut().unwrap() ^= 1;
-            assert!(Inspection::inspect(&tampered, &KEY, &carrier, generation, PD,
-                NOW + 901, mode, Box::new(NoBodies)).is_err());
+            assert!(Inspection::inspect(
+                &tampered,
+                &KEY,
+                &carrier,
+                generation,
+                PD,
+                NOW + 901,
+                mode,
+                Box::new(NoBodies)
+            )
+            .is_err());
         }
         // Inspection did not acknowledge persistence or change the original live
         // attempt: only its exact stored generation can release the cached reply.

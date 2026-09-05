@@ -74,15 +74,24 @@ fn one_checkpoint(effects: Vec<CredentialV2AllocatorEffect>, generation: u64) ->
 // used by both Full and Manual fixtures; expected mode is never inferred from C.
 fn assert_read_only_inspection(checkpoint: &[u8], carrier: &[u8], generation: u64) {
     use cbcl_pairing::credential_v2::{
-        CredentialV2AllocatorCheckpointInspection as Inspection,
-        CredentialV2AllocatorMode as Mode,
+        CredentialV2AllocatorCheckpointInspection as Inspection, CredentialV2AllocatorMode as Mode,
     };
     let carrier = decode_carrier(carrier).unwrap();
     for now in [NOW, EXPIRY, EXPIRY + 1] {
         let mut accepted = 0;
         for mode in [Mode::Full, Mode::Manual] {
-            let Ok(view) = Inspection::inspect(checkpoint, &WRAPPING_KEY, &carrier,
-                generation, PROFILE_DIGEST, now, mode, Box::new(AcceptBodies)) else { continue; };
+            let Ok(view) = Inspection::inspect(
+                checkpoint,
+                &WRAPPING_KEY,
+                &carrier,
+                generation,
+                PROFILE_DIGEST,
+                now,
+                mode,
+                Box::new(AcceptBodies),
+            ) else {
+                continue;
+            };
             accepted += 1;
             assert_eq!(view.is_expired(), now >= EXPIRY);
             if let Some(authenticated_mode) = view.bootstrap_mode() {
@@ -95,18 +104,34 @@ fn assert_read_only_inspection(checkpoint: &[u8], carrier: &[u8], generation: u6
                 assert!(view.endpoint_phase().is_some());
                 assert!(view.transcript_hash().is_some());
                 assert!(view.receipt_recovery_commitment().is_some());
-                if view.endpoint_phase() == Some(cbcl_pairing::credential_v2::CredentialV2Phase::Terminal) {
+                if view.endpoint_phase()
+                    == Some(cbcl_pairing::credential_v2::CredentialV2Phase::Terminal)
+                {
                     assert!(view.terminal_receipt_binding().is_some());
                     assert!(view.last_received_object().is_none());
-                } else { assert!(view.terminal_receipt_binding().is_none()); }
+                } else {
+                    assert!(view.terminal_receipt_binding().is_none());
+                }
             }
             if now >= EXPIRY {
-                assert!(CredentialV2AllocatorSession::restore(checkpoint, &WRAPPING_KEY,
-                    carrier.clone(), generation, PROFILE_DIGEST, now, mode, [0x61; 32],
-                    Box::new(AcceptBodies)).is_err());
+                assert!(CredentialV2AllocatorSession::restore(
+                    checkpoint,
+                    &WRAPPING_KEY,
+                    carrier.clone(),
+                    generation,
+                    PROFILE_DIGEST,
+                    now,
+                    mode,
+                    [0x61; 32],
+                    Box::new(AcceptBodies)
+                )
+                .is_err());
             }
         }
-        assert!(accepted > 0, "a real sealed checkpoint must remain inspectable after expiry");
+        assert!(
+            accepted > 0,
+            "a real sealed checkpoint must remain inspectable after expiry"
+        );
     }
 }
 
@@ -1025,11 +1050,22 @@ fn assert_receipt_flow(mode: cbcl_pairing::credential_v2::CredentialV2AllocatorM
     };
     assert_eq!(*receipt_generation, generation);
     assert_read_only_inspection(receipt_checkpoint.as_bytes(), receipt_carrier, generation);
-    let inspection = cbcl_pairing::credential_v2::CredentialV2AllocatorCheckpointInspection::inspect(
-        receipt_checkpoint.as_bytes(), &WRAPPING_KEY, &decode_carrier(receipt_carrier).unwrap(),
-        generation, PROFILE_DIGEST, EXPIRY, mode, Box::new(AcceptBodies),
-    ).unwrap();
-    assert_eq!(inspection.terminal_receipt_binding(), Some((*receipt.intent_digest(), receipt.content_hash())));
+    let inspection =
+        cbcl_pairing::credential_v2::CredentialV2AllocatorCheckpointInspection::inspect(
+            receipt_checkpoint.as_bytes(),
+            &WRAPPING_KEY,
+            &decode_carrier(receipt_carrier).unwrap(),
+            generation,
+            PROFILE_DIGEST,
+            EXPIRY,
+            mode,
+            Box::new(AcceptBodies),
+        )
+        .unwrap();
+    assert_eq!(
+        inspection.terminal_receipt_binding(),
+        Some((*receipt.intent_digest(), receipt.content_hash()))
+    );
     let commands = sent(&allocator.checkpoint_persisted(generation).unwrap());
     let [ClientMessage::Put {
         seq: 4,

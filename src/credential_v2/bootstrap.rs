@@ -525,16 +525,28 @@ impl CredentialV2AllocatorBootstrap {
     // The value is consumed within the inspection module and never returned to
     // a caller. Its C/T/scalar/channel temporaries erase on drop after projection.
     pub(super) fn inspect_checkpoint(
-        input: &[u8], wrapping_key: &[u8; 32], carrier: &CredentialV2Carrier,
-        generation: u64, expected_mode: CredentialV2AllocatorMode,
+        input: &[u8],
+        wrapping_key: &[u8; 32],
+        carrier: &CredentialV2Carrier,
+        generation: u64,
+        expected_mode: CredentialV2AllocatorMode,
     ) -> Result<Self, CredentialV2Error> {
         let opened = super::checkpoint::inspect_checkpoint_plaintext(
-            input, wrapping_key, carrier, generation,
+            input,
+            wrapping_key,
+            carrier,
+            generation,
         )?;
         if opened.expiry != Some(carrier.relay_expires_at()) {
             return Err(CredentialV2Error::Schema);
         }
-        Self::decode_inner(&opened.plaintext, carrier, generation, opened.nonce, expected_mode)
+        Self::decode_inner(
+            &opened.plaintext,
+            carrier,
+            generation,
+            opened.nonce,
+            expected_mode,
+        )
     }
 
     fn encode_inner(
