@@ -1,0 +1,8 @@
+evidence/manual-pairing-2026-09-05.md:93: trailing whitespace.
++artefacts   REQ=6 CON=2 TEST=12 SPEC=4 IMPL=1 
+evidence/manual-pairing/evidence-count.txt:1: trailing whitespace.
++artefacts   REQ=6 CON=2 TEST=12 SPEC=4 IMPL=1 
+evidence/manual-pairing/focused-initial.log:37: new blank line at EOF.
+evidence/manual-pairing/library-integration-doc.log:394: new blank line at EOF.
+evidence/manual-pairing/recovery-green.log:38: new blank line at EOF.
+evidence/manual-pairing/restored-focused-green.log:99: new blank line at EOF.

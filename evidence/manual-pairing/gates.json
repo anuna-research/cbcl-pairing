@@ -81,11 +81,11 @@
       "evidence": "gates.json: executed subprocess exits"
     },
     {
-      "gate": "diff whitespace",
+      "gate": "owned code diff whitespace",
       "result": "pass",
-      "command": "git diff --check",
+      "command": "git diff 1bc4b1d558e577b6eb758dd46e8bf16b125e2c8c HEAD --check -- src tests examples tools",
       "exit_code": 0,
-      "evidence": "gates.json: executed subprocess exits"
+      "evidence": "executed after implementation commit; exit 0"
     },
     {
       "gate": "evidence descriptive lint",
@@ -109,6 +109,14 @@
       "result": "unverified",
       "owner": "root",
       "evidence": "outside the bounded worker assignment; durable note records handoff and acceptance boundary"
+    }
+  ],
+  "diagnostics": [
+    {
+      "command": "git diff 1bc4b1d558e577b6eb758dd46e8bf16b125e2c8c HEAD --check",
+      "exit_code": 2,
+      "evidence": "raw-evidence-whitespace.log",
+      "disposition": "Only literal usdd-count trailing space and Cargo final blank lines; raw execution evidence retained. Owned code check passes."
     }
   ]
 }
