@@ -1,0 +1,22 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+    Finished `test` profile [unoptimized] target(s) in 0.84s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/cbcl_pairing-215f7e2f81de7aa0)
+
+running 1 test
+test credential_v2::allocator::tests::terminal_input_erases_unconsumed_scalar_presence_and_wrapping_key ... FAILED
+
+failures:
+
+---- credential_v2::allocator::tests::terminal_input_erases_unconsumed_scalar_presence_and_wrapping_key stdout ----
+
+thread 'credential_v2::allocator::tests::terminal_input_erases_unconsumed_scalar_presence_and_wrapping_key' (7781672) panicked at src/credential_v2/allocator/tests.rs:36:5:
+assertion failed: session.presence.is_none()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    credential_v2::allocator::tests::terminal_input_erases_unconsumed_scalar_presence_and_wrapping_key
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--lib`

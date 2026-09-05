@@ -1,0 +1,99 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+    Finished `test` profile [unoptimized] target(s) in 4.56s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/cbcl_pairing-215f7e2f81de7aa0)
+
+running 10 tests
+test cbcl_protocol::tests::depth_preflight_ignores_parentheses_inside_strings ... ok
+test cbcl_protocol::tests::strict_lower_hex_roundtrips ... ok
+test cpace::field::tests::generated_field_wrapper_roundtrips_and_inverts ... ok
+test credential_v2::checkpoint::tests::independent_checkpoint_key_vector_is_exact ... ok
+test cpace::field::tests::official_generator_field_intermediates_match ... ok
+test credential_v2::allocator::tests::terminal_input_erases_unconsumed_scalar_presence_and_wrapping_key ... ok
+test credential_v2::bootstrap::tests::inner_tag_is_exact_v3_mode_only_and_old_v2_restores_full_only ... ok
+test credential_v2::bootstrap::tests::every_old_bootstrap_phase_restores_only_full_with_exact_cached_frames ... ok
+test credential_v2::bootstrap::tests::retained_scalar_and_cached_share_are_checked_before_any_recovered_output ... ok
+test credential_v2::channel::independent_tests::test_066_python_oracle_reproduces_complete_v2_schedule_and_first_frame ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/credential_v2_allocator_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_allocator_session-ee6e326b69d793f7)
+
+running 5 tests
+test carrier_and_checkpoint_are_withheld_on_allocation_mismatch_or_expiry ... ok
+test allocator_restores_the_bound_membership_and_only_the_cached_frame ... ok
+test allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame ... ok
+test manual_allocator_preserves_both_decisions_comparison_payload_receipt_and_recovery ... ok
+test allocator_releases_the_receipt_after_the_payload ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests/credential_v2_bootstrap_checkpoint.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_bootstrap_checkpoint-15d1d9c6a3116b8e)
+
+running 2 tests
+test test_065_allocator_bootstrap_checkpoint_requires_numeric_live_expiry_and_exact_bindings ... ok
+test test_065_allocator_restores_every_pre_finished_state_and_erases_presence_secrets ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/credential_v2_display.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_display-7813efa1a6bacddf)
+
+running 5 tests
+test ceremony_contact_is_truthful_and_cannot_be_supplied_by_peer_claims ... ok
+test test_062_only_an_offer_can_create_peer_input_and_display ... ok
+test test_062_verdict_only_boundary_copies_only_authority ... ok
+test test_062_transition_room_grammar_and_constructive_maximum_are_exact ... ok
+test test_062_every_overlapping_peer_mismatch_refuses_before_verifier ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/credential_v2_handoff.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_handoff-c396434fb195bd8d)
+
+running 8 tests
+test inner_carrier_errors_are_redacted_and_use_the_existing_recognizer ... ok
+test commitment_is_to_m_and_t_only_and_never_c_concatenated_with_t ... ok
+test lexical_version_size_and_encoding_failures_are_closed ... ok
+test commitment_guard_rejects_wrong_t_in_constructor ... ok
+test deterministic_vectors_preserve_exact_carrier_digest_and_independent_secrets ... ok
+test commitment_guard_rejects_wrong_t_in_recognizer ... ok
+test fixed_schema_rejects_noncanonical_nested_extra_and_truncated_input ... ok
+test valid_domain_properties_include_length_integer_key_and_secret_boundaries ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.61s
+
+     Running tests/credential_v2_handoff_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_handoff_session-71281b45c69fcb50)
+
+running 2 tests
+test closed_or_failed_session_with_retained_t_exports_nothing ... ok
+test exact_retained_handoff_is_available_until_claim_admission_before_finished ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/credential_v2_manual.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_manual-27d17ce3847ac128)
+
+running 8 tests
+test formats_never_fall_back_to_another_recognizer ... ok
+test bootstrap_lexical_bounds_and_canonical_encoding_are_closed ... ok
+test phrase_normalization_is_exactly_ascii_case_and_four_separators ... ok
+test independent_real_cpace_and_finished_vector_uses_unchanged_context ... ok
+test independent_word_vectors_pin_list_hash_indices_checksum_mapping_and_mask ... ok
+test independent_bootstrap_vectors_have_no_c_or_verifier_and_exact_bounds ... ok
+test carrier_commitment_key_and_exclusive_expiry_precede_typed_input ... ok
+test bootstrap_fixed_schema_rejects_nesting_extras_nonminimal_lengths_and_truncation ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/credential_v2_manual_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_manual_session-4c3f4c6c3e64c7cb)
+
+running 5 tests
+test explicit_mode_controls_all_exporters_even_for_full_c_with_manual_prefix ... ok
+test checksum_valid_wrong_phrase_fails_both_finished_values_without_application_effects ... ok
+test expired_replay_and_every_terminal_input_export_nothing ... ok
+test pre_peer_restore_uses_each_explicit_shell_scalar_in_both_modes ... ok
+test wrong_valid_phrase_pins_one_peer_across_every_ack_response_crash_boundary ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+

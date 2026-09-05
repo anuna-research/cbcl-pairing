@@ -1,0 +1,26 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+    Finished `test` profile [unoptimized] target(s) in 1.10s
+     Running tests/credential_v2_manual_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_manual_session-4c3f4c6c3e64c7cb)
+
+running 5 tests
+test explicit_mode_controls_all_exporters_even_for_full_c_with_manual_prefix ... ok
+test expired_replay_and_every_terminal_input_export_nothing ... ok
+test checksum_valid_wrong_phrase_fails_both_finished_values_without_application_effects ... ok
+test wrong_valid_phrase_pins_one_peer_across_every_ack_response_crash_boundary ... FAILED
+test pre_peer_restore_uses_each_explicit_shell_scalar_in_both_modes ... ok
+
+failures:
+
+---- wrong_valid_phrase_pins_one_peer_across_every_ack_response_crash_boundary stdout ----
+
+thread 'wrong_valid_phrase_pins_one_peer_across_every_ack_response_crash_boundary' (7780393) panicked at tests/credential_v2_manual_session.rs:235:17:
+assertion failed: receive(&mut r, frame(other), 8).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    wrong_valid_phrase_pins_one_peer_across_every_ack_response_crash_boundary
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `--test credential_v2_manual_session`

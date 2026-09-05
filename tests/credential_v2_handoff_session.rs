@@ -25,6 +25,7 @@ impl CredentialV2BodyVerifier for NoApplicationCalls {
 fn session() -> CredentialV2AllocatorSession {
     CredentialV2AllocatorSession::new(
         CredentialV2AllocatorSessionInput {
+            mode: cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
             application_context: "https://a.b/a".into(),
             relay_origin: "https://r".into(),
             mailbox_id: [0x11; 32],
@@ -81,6 +82,8 @@ fn restore(
         generation,
         PROFILE,
         now,
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
+        [0x39; 32],
         Box::new(NoApplicationCalls),
     )
 }

@@ -285,3 +285,36 @@ fn assert_display_matches_authority(
     assert_eq!(display.transition(), authority.transition());
     assert_eq!(display.offer_core_digest(), authority.offer_core_digest());
 }
+
+// SPEC-079 CON-001 / SPEC-001 CON-029: provenance is local consumer authority.
+#[test]
+fn ceremony_contact_is_truthful_and_cannot_be_supplied_by_peer_claims() {
+    let object = offer(OFFER_CORE);
+    for provenance in [
+        CredentialV2TofuState::CeremonyGesture,
+        CredentialV2TofuState::NewPair,
+        CredentialV2TofuState::TrustedPair,
+    ] {
+        let claims = peer_claims();
+        let authority = CredentialV2IntentAuthority::new(claims.clone(), provenance).unwrap();
+        let mut parser = Parser { calls: 0, claims };
+        let mut verifier = Verifier::default();
+        let display =
+            recognise_credential_v2_intent(&object, &authority, &mut parser, &mut verifier)
+                .unwrap();
+        assert_eq!(display.tofu_state(), provenance);
+        assert_eq!(authority.tofu_state(), provenance);
+        assert_eq!(verifier.calls, 1);
+        assert_eq!(display.application_id(), authority.application_id());
+        assert_eq!(
+            display.carrier_ceremony_id(),
+            authority.carrier_ceremony_id()
+        );
+        // Same peer bytes and claims in all three cases; verifier refusal still blocks display.
+        verifier.refuse = true;
+        assert_eq!(
+            recognise_credential_v2_intent(&object, &authority, &mut parser, &mut verifier),
+            Err(CredentialV2Error::Profile)
+        );
+    }
+}

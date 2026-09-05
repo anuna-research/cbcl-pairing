@@ -1,0 +1,111 @@
+{
+  "baseline": "1bc4b1d558e577b6eb758dd46e8bf16b125e2c8c",
+  "branch": "circus/pairing-manual/1",
+  "unchanged": [
+    {
+      "path": "Cargo.toml",
+      "unchanged_from_baseline": true,
+      "sha256": "106237bfde7e9779082a1ad49f97420e80c7f02ee6a7d8e955cd8504efc82d57"
+    },
+    {
+      "path": "Cargo.lock",
+      "unchanged_from_baseline": true,
+      "sha256": "29cc54f21798c01e327ee63d5fc620bda68542c37c73f61e2b04f802ef82c788"
+    },
+    {
+      "path": "src/cpace.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "73c4a70c5cabdf1639e8ef5fc14db61fb7f61c19f93421e65e21db57e2b4e22b"
+    },
+    {
+      "path": "src/cpace/field.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "98d6a61d0c056239ff4232ba850f1cc8bf46f12b69dc47f6540ccbe9525fc711"
+    },
+    {
+      "path": "src/credential_v2/context.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "4056b79223743be0bb4744e48b460066fc59f8005457f2fccf5592d5999cb567"
+    },
+    {
+      "path": "src/credential_v2/frame.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "7708c8c726e4ccd54562ab2558cf7dcea2dc63f9bfdaa448f03179a2372d70c5"
+    },
+    {
+      "path": "src/credential_v2/object.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "745be37cc3654e78481ba7e3320346d9c85916b189528a5e164b6b25078ccaed"
+    },
+    {
+      "path": "src/credential_v2/channel.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "ecc80427eccca89cd6281913299dd15e5269155c7c12bab15d3470375ab80637"
+    },
+    {
+      "path": "src/credential_v2/checkpoint.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "8529da587108c2c12ba1fd1e7e8463a5166e57659aa45f23715ee0ef631e5c8c"
+    },
+    {
+      "path": "src/credential_v2/claimant.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "b4f3c14d245df8a5de7e2c1d5c1a5d3175072e89a8cde8362539a50db04351dd"
+    },
+    {
+      "path": "src/credential_v2/carrier.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "77299ad082a9f778b61e164f7db7060b977a1422cf741fc87426f2356e25e62a"
+    },
+    {
+      "path": "src/credential_v2/presence.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "432e7fc0dee860a6fe6ad1d32206326e1c464ca9df69b0837caebd19f74d07c3"
+    },
+    {
+      "path": "src/wire.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "a7d5318d2984a3383fbc5af595e4232f1fb9da980e848f7a502122bd77b9c55b"
+    },
+    {
+      "path": "src/relay.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "87fc2d2dcd4e206d610ee4ece630b6d3bdf411967265a549093c49754eb68000"
+    },
+    {
+      "path": "src/bin/cbcl-pairing-relay.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "c711f24f19f2e76da03493e478274cfdc50a9431c53520056e0fb42ff8951562"
+    },
+    {
+      "path": "src/bin/cbcl-pairing-relay-ws.rs",
+      "unchanged_from_baseline": true,
+      "sha256": "9fbcf0fe4d2281f4a7c147080996045033204a74fe5b5e79bc9a6f7e69416ed0"
+    },
+    {
+      "path": "schemas/pairing-v1.cddl",
+      "unchanged_from_baseline": true,
+      "sha256": "8d676f35c8a9fe67cd96efe3e6a79ec9e0dfcc23211beed0776fdd4716491d8f"
+    },
+    {
+      "path": "schemas/pairing-v1.abnf",
+      "unchanged_from_baseline": true,
+      "sha256": "a9274224793f49551d402110f6787c1d2be9034d2a3eb149ea9c8c0ff38cb1fa"
+    },
+    {
+      "path": "dialects/blind-pairing-bootstrap-v1.cbcl",
+      "unchanged_from_baseline": true,
+      "sha256": "5607ca9c015767c433040e58e261828e6c29d427ec66ce1b76e2294cfecfa8c3"
+    },
+    {
+      "path": "dialects/blind-pairing-session-v1.cbcl",
+      "unchanged_from_baseline": true,
+      "sha256": "f7908e42da5fe1a63e546f4d5e7619bb20f78d06c43273f8a839e82c459c9805"
+    },
+    {
+      "path": "specs/SPEC-001-reusable-blind-pairing.md",
+      "unchanged_from_baseline": true,
+      "sha256": "6e1dcf0e7bbc868beb7cc8addaea973f3ab686b630fa231f257760a811841fad"
+    }
+  ]
+}

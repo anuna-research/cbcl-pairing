@@ -1,0 +1,394 @@
+   Compiling const-oid v0.10.2
+   Compiling rand_core v0.10.1
+   Compiling bytes v1.12.1
+   Compiling thiserror v2.0.20
+   Compiling httparse v1.10.1
+   Compiling data-encoding v2.11.1
+   Compiling log v0.4.33
+   Compiling getrandom v0.3.4
+   Compiling getrandom v0.4.3
+   Compiling chacha20 v0.10.1
+   Compiling digest v0.11.3
+   Compiling rand v0.10.2
+   Compiling hmac v0.13.0
+   Compiling sha1 v0.11.0
+   Compiling sha2 v0.11.0
+   Compiling hkdf v0.13.0
+   Compiling http v1.5.0
+   Compiling tungstenite v0.30.0
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+    Finished `test` profile [unoptimized] target(s) in 4.83s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/cbcl_pairing-2d5235be9dac2bb9)
+
+running 10 tests
+test cbcl_protocol::tests::depth_preflight_ignores_parentheses_inside_strings ... ok
+test cpace::field::tests::generated_field_wrapper_roundtrips_and_inverts ... ok
+test cbcl_protocol::tests::strict_lower_hex_roundtrips ... ok
+test cpace::field::tests::official_generator_field_intermediates_match ... ok
+test credential_v2::checkpoint::tests::independent_checkpoint_key_vector_is_exact ... ok
+test credential_v2::allocator::tests::terminal_input_erases_unconsumed_scalar_presence_and_wrapping_key ... ok
+test credential_v2::bootstrap::tests::inner_tag_is_exact_v3_mode_only_and_old_v2_restores_full_only ... ok
+test credential_v2::bootstrap::tests::every_old_bootstrap_phase_restores_only_full_with_exact_cached_frames ... ok
+test credential_v2::bootstrap::tests::retained_scalar_and_cached_share_are_checked_before_any_recovered_output ... ok
+test credential_v2::channel::independent_tests::test_066_python_oracle_reproduces_complete_v2_schedule_and_first_frame ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running unittests src/bin/cbcl-pairing-relay.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/cbcl_pairing_relay-2dbabf07dfc5d295)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/cbcl-pairing-relay-ws.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/cbcl_pairing_relay_ws-36e53d85fa963e85)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/assurance_properties.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/assurance_properties-aec99bffa8f324d7)
+
+running 4 tests
+test intent_state_retains_no_display_metadata ... ok
+test random_mailbox_traces_preserve_blind_bounded_state ... ok
+test hostile_bytes_roundtrip_if_and_only_if_recognised ... ok
+test random_channel_payloads_are_contiguous_and_corruption_is_terminal ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/cbcl_protocol.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/cbcl_protocol-504216fc50dd8d85)
+
+running 16 tests
+test control_encoding_accepts_the_maximum_length_and_refuses_one_octet_more ... ok
+test control_nesting_is_accepted_at_the_maximum_depth_and_refused_one_deeper ... ok
+test each_dialect_source_is_pinned_independently ... ok
+test test_020_ceremony_keys_sign_canonical_controls_and_detect_mutation ... ok
+test ceremony_identifier_must_be_exactly_sixty_four_lowercase_hex_digits ... ok
+test test_020_opener_pin_is_exact_and_signature_checked ... ok
+test exact_duplicate_admission_is_idempotent ... ok
+test test_020_dialects_install_only_at_exact_sources_and_hashes ... ok
+test test_020_bootstrap_mapping_body_thread_and_key_are_pre_store_gates ... ok
+test both_finished_controls_are_accepted_after_the_fan_in ... ok
+test test_021_exact_role_opener_is_the_only_session_root ... ok
+test test_022_sibling_decisions_each_have_a_valid_causal_verdict ... ok
+test test_020_session_sender_recipient_predecessor_and_body_mutants_fail ... ok
+test the_session_store_counts_every_distinct_admitted_control ... ok
+test test_021_finished_is_unknown_until_both_cpace_controls_exist ... ok
+test the_role_opener_admits_only_the_exact_inert_hello ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/channel.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/channel-0e4a9a400f399258)
+
+running 7 tests
+test transcript_hkdf_finished_and_exporter_match_independent_values ... ok
+test both_directions_roundtrip_with_independent_contiguous_counters ... ok
+test wrong_cpace_secret_fails_explicit_key_confirmation ... ok
+test each_corrupt_finished_value_blocks_channel_activation ... ok
+test transcript_and_directional_keys_are_separated ... ok
+test replay_gap_wrong_direction_and_bad_tag_are_terminal ... ok
+test nonce_aad_and_size_bounds_are_exact ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/context.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/context-2c1ef7a32bd35079)
+
+running 3 tests
+test normative_context_fixes_ci_sid_roles_and_optional_key_identity ... ok
+test nested_cpace_message_is_deterministic_and_role_consistent ... ok
+test pairing_start_reconstructs_and_checks_the_peer_associated_data ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/cpace.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/cpace-06dbb0e3336df941)
+
+running 8 tests
+test generator_string_has_the_pinned_hash_input_layout ... ok
+test transcript_context_is_bound_and_secret_state_is_redacted ... ok
+test protocol_completion_rejects_a_low_order_peer_share ... ok
+test draft_21_noncanonical_and_valid_inputs_match ... ok
+test draft_21_cpace255_generator_and_exchange_vector ... ok
+test draft_21_low_order_inputs_are_rejected ... ok
+test both_secret_entropy_classes_use_the_same_exchange ... ok
+test wrong_secret_context_or_associated_data_cannot_agree ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/credential_v2_admission.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_admission-824466a03cdfe78c)
+
+running 7 tests
+test test_060_exact_bearer_claims_once_and_erases_commitment ... ok
+test test_060_wrong_and_cross_mailbox_bearers_change_no_state ... ok
+test test_060_relay_wrong_bearer_is_closed_unknown_and_exact_bearer_claims ... ok
+test test_060_v2_wire_accepts_only_exact_or_omitted_lifetime ... ok
+test test_060_v2_wire_round_trips_without_changing_v1_variants ... ok
+test test_060_inconsistent_v2_store_state_fails_startup ... ok
+test test_060_v2_pending_claimed_and_closed_states_restart_without_bearers ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/credential_v2_allocator_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_allocator_session-92c8006108ce04db)
+
+running 5 tests
+test carrier_and_checkpoint_are_withheld_on_allocation_mismatch_or_expiry ... ok
+test allocator_restores_the_bound_membership_and_only_the_cached_frame ... ok
+test allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame ... ok
+test allocator_releases_the_receipt_after_the_payload ... ok
+test manual_allocator_preserves_both_decisions_comparison_payload_receipt_and_recovery ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/credential_v2_bootstrap_checkpoint.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_bootstrap_checkpoint-dddaea432e42abcd)
+
+running 2 tests
+test test_065_allocator_bootstrap_checkpoint_requires_numeric_live_expiry_and_exact_bindings ... ok
+test test_065_allocator_restores_every_pre_finished_state_and_erases_presence_secrets ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/credential_v2_channel.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_channel-e7a7a2274816af3e)
+
+running 5 tests
+test test_063_wrong_arm_or_padding_refuses ... ok
+test test_061_carrier_application_is_an_identifier_not_an_origin ... ok
+test test_061_carrier_and_context_are_separate_canonical_v2_values ... ok
+test test_063_object_kind_arms_padding_and_lengths_are_exact ... ok
+test test_061_v2_cpace_finished_aad_and_ciphertext_interoperate ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/credential_v2_claimant_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_claimant_session-72a24f701c1b52fe)
+
+running 1 test
+test claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/credential_v2_display.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_display-0af6dfa29f514d72)
+
+running 5 tests
+test test_062_only_an_offer_can_create_peer_input_and_display ... ok
+test ceremony_contact_is_truthful_and_cannot_be_supplied_by_peer_claims ... ok
+test test_062_verdict_only_boundary_copies_only_authority ... ok
+test test_062_transition_room_grammar_and_constructive_maximum_are_exact ... ok
+test test_062_every_overlapping_peer_mismatch_refuses_before_verifier ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/credential_v2_endpoint.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_endpoint-41a9a78c4ba7cf99)
+
+running 9 tests
+test test_061_only_exact_latest_retransmission_is_idempotent ... ok
+test test_061_full_choreography_sender_predecessor_and_terminal_are_exact ... ok
+test test_061_wrong_sender_predecessor_intent_and_verifier_refusal_are_terminal ... ok
+test test_067_recovery_mismatch_and_post_payload_refusal_leave_receipt_pending ... ok
+test test_064_post_payload_refusal_neither_advances_nor_erases_receipt_wait ... ok
+test test_067_recovered_receipt_uses_registered_verifier_and_same_terminal_reducer ... ok
+test test_061_cached_outbound_refuses_a_successor_without_mutating_phase ... ok
+test test_065_checkpoint_bindings_expiry_generation_and_nonce_are_closed ... ok
+test test_065_sealed_checkpoint_restores_exact_payload_receipt_wait ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/credential_v2_handoff.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_handoff-4a4a49d2b84d14d7)
+
+running 8 tests
+test inner_carrier_errors_are_redacted_and_use_the_existing_recognizer ... ok
+test lexical_version_size_and_encoding_failures_are_closed ... ok
+test commitment_guard_rejects_wrong_t_in_constructor ... ok
+test commitment_is_to_m_and_t_only_and_never_c_concatenated_with_t ... ok
+test deterministic_vectors_preserve_exact_carrier_digest_and_independent_secrets ... ok
+test commitment_guard_rejects_wrong_t_in_recognizer ... ok
+test fixed_schema_rejects_noncanonical_nested_extra_and_truncated_input ... ok
+test valid_domain_properties_include_length_integer_key_and_secret_boundaries ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.53s
+
+     Running tests/credential_v2_handoff_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_handoff_session-3dd1ea699a07b529)
+
+running 2 tests
+test closed_or_failed_session_with_retained_t_exports_nothing ... ok
+test exact_retained_handoff_is_available_until_claim_admission_before_finished ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/credential_v2_manual.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_manual-9463ee9ea7d910b8)
+
+running 8 tests
+test phrase_normalization_is_exactly_ascii_case_and_four_separators ... ok
+test formats_never_fall_back_to_another_recognizer ... ok
+test independent_word_vectors_pin_list_hash_indices_checksum_mapping_and_mask ... ok
+test bootstrap_lexical_bounds_and_canonical_encoding_are_closed ... ok
+test independent_real_cpace_and_finished_vector_uses_unchanged_context ... ok
+test independent_bootstrap_vectors_have_no_c_or_verifier_and_exact_bounds ... ok
+test carrier_commitment_key_and_exclusive_expiry_precede_typed_input ... ok
+test bootstrap_fixed_schema_rejects_nesting_extras_nonminimal_lengths_and_truncation ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/credential_v2_manual_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_manual_session-2396eedb3d089c9b)
+
+running 5 tests
+test explicit_mode_controls_all_exporters_even_for_full_c_with_manual_prefix ... ok
+test expired_replay_and_every_terminal_input_export_nothing ... ok
+test checksum_valid_wrong_phrase_fails_both_finished_values_without_application_effects ... ok
+test pre_peer_restore_uses_each_explicit_shell_scalar_in_both_modes ... ok
+test wrong_valid_phrase_pins_one_peer_across_every_ack_response_crash_boundary ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/credential_v2_presence.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_presence-ea80f5364c253df0)
+
+running 1 test
+test pair1_round_trips_independent_secrets_and_rejects_every_substitution ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/dialects.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/dialects-39ce91f189fff00b)
+
+running 2 tests
+test test_020_session_projections_are_complementary ... ok
+test test_020_exact_sources_and_canonical_hashes_match ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/endpoint.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/endpoint-b092a3981014d664)
+
+running 14 tests
+test invitation_is_bound_before_the_first_guess_and_only_exact_resume_survives ... ok
+test invitation_record_roundtrips_durably_and_rejects_noncanonical_state ... ok
+test explicit_cancellation_consumes_the_invitation_and_erases_secrets ... ok
+test peer_signed_but_wrong_finished_is_terminal_and_erases_keys ... ok
+test test_021_unknown_finished_has_no_crypto_or_role_cast_effect ... ok
+test test_009_decline_erases_both_endpoints_and_releases_no_payload ... ok
+test test_011_cpace_replay_fork_and_omission_cannot_activate_an_endpoint ... ok
+test test_012_approved_payload_is_released_once_and_only_for_the_intent_digest ... ok
+test test_011_finished_replay_reorder_and_omission_are_terminal_before_acceptance ... ok
+test test_022_two_valid_decision_siblings_received_in_sequence_are_terminal ... ok
+test test_022_decision_is_atomic_replay_idempotent_and_conflict_terminal ... ok
+test a_replayed_channel_frame_is_refused_and_terminates_the_endpoint ... ok
+test test_011_sealed_replay_fork_and_omission_cannot_release_a_grant ... ok
+test test_019_authorization_cannot_bypass_pairing_gates ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/independent_endpoint.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/independent_endpoint-4f8132949f088331)
+
+running 1 test
+test test_018_independent_python_endpoint_agrees_on_every_public_vector ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/limiter_observability.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/limiter_observability-da8e58f95aab7c1e)
+
+running 7 tests
+test test_015_periodic_sweep_runs_before_capacity_refusal ... ok
+test test_017_operator_keys_separate_peer_pseudonyms ... ok
+test test_025_backwards_time_is_clamped_without_refusing_admission ... ok
+test test_014_logs_and_metrics_have_only_closed_non_sensitive_dimensions ... ok
+test test_015_keyed_dimensions_have_independent_budgets_and_fixed_cooldown ... ok
+test test_026_ipv6_prefixes_and_lru_replacement_preserve_admission ... ok
+test test_015_every_operation_is_limited_and_entry_cap_survives_churn ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mailbox.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/mailbox-b3fea9f2831790ad)
+
+running 6 tests
+test test_003_third_distinct_claim_crowds_and_allocates_no_membership ... ok
+test test_001_offline_peer_receives_exact_queued_frame_and_ack_deletes_it ... ok
+test test_029_existing_claimant_hash_cannot_reclaim ... ok
+test test_004_sequence_retries_are_idempotent_and_conflicts_are_terminal ... ok
+test test_002_snapshot_contains_only_blind_mailbox_domain_state ... ok
+test test_013_lifetime_bounds_terminal_deletion_and_original_expiry_reaping ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/profiles.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/profiles-ee3bd9991e22b2f4)
+
+running 9 tests
+test synthetic_claims_are_bounded_on_both_fields ... ok
+test test_006_agent_carrier_derives_two_independent_bip39_words_from_22_csprng_bits ... ok
+test bounded_claim_text_holds_at_its_exact_limit_and_refuses_the_edges ... ok
+test grant_payloads_hold_at_both_ends_of_their_size_bound ... ok
+test profile_payloads_are_canonical_bound_and_verifier_owned ... ok
+test credential_origins_must_be_canonical_https_authorities ... ok
+test test_010_profiles_are_endpoint_local_and_describe_their_carriers ... ok
+test credential_and_synthetic_payloads_bind_every_profile_field ... ok
+test test_010_synthetic_profile_leaves_relay_assets_byte_identical ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/recognition.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/recognition-810fe8530309aa76)
+
+running 8 tests
+test test_005_rejects_non_deterministic_and_trailing_cbor ... ok
+test test_005_accepts_every_valid_client_command ... ok
+test test_005_rejects_numeric_and_body_boundaries ... ok
+test test_005_rejects_unknown_and_duplicate_keys_for_every_client_command ... ok
+test test_005_recognises_invitation_abnf_and_canonical_origin ... ok
+test test_005_recognises_all_other_top_level_grammars ... ok
+test test_005_all_typed_values_roundtrip_to_identical_deterministic_bytes ... ok
+test test_023_maximum_adversarial_wire_message_has_bounded_recognition_work ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/relay_process.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/relay_process-569d796d53bb3883)
+
+running 1 test
+test test_017_two_isolated_relay_processes_complete_both_profiles_identically ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.73s
+
+     Running tests/relay_service.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/relay_service-16d312d3179a6e55)
+
+running 8 tests
+test relay_configuration_rejects_each_independent_capacity_error ... ok
+test test_028_nameplate_sampling_rejects_the_biased_tail ... ok
+test test_025_relay_admission_survives_backwards_wall_clock_step ... ok
+test bind_is_mandatory_and_production_allocation_stays_disabled_by_default ... ok
+test test_025_periodic_service_sweep_respects_exact_interval_boundaries ... ok
+test membership_token_reuse_and_projected_queue_overflow_fail_closed ... ok
+test queued_delivery_ack_reconnect_crowding_and_expiry_use_only_mailbox_semantics ... ok
+test test_017_two_isolated_operator_instances_have_identical_protocol_results ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/relay_work_bounds.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/relay_work_bounds-a93c41eceecbff0d)
+
+running 2 tests
+test restored_indexes_reject_duplicate_memberships_and_independent_capacity_overflow ... ok
+test test_024_ping_and_no_expiry_sweep_do_not_copy_queued_bodies ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.29s
+
+     Running tests/storage.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/storage-2cbe45722b7a01e8)
+
+running 3 tests
+test restart_deletes_interrupted_atomic_temporary_records ... ok
+test runtime_kill_switch_refuses_new_allocation_without_closing_existing_mailbox ... ok
+test durable_store_resumes_queue_ack_terminal_and_original_expiry ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/websocket_process.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/websocket_process-be2cd52f309acef1)
+
+running 2 tests
+test test_027_oversize_websocket_message_returns_413_before_close ... ok
+test websocket_shell_carries_exact_cbor_and_routes_asynchronously ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+
+   Doc-tests cbcl_pairing
+
+running 7 tests
+test src/credential_v2/display.rs - credential_v2::display::PathAToBDisplay (line 154) - compile fail ... ok
+test src/credential_v2/checkpoint.rs - credential_v2::checkpoint::EndpointCheckpointV2 (line 43) - compile fail ... ok
+test src/profile.rs - profile::DisplayIntent (line 126) - compile fail ... ok
+test src/credential_v2/display.rs - credential_v2::display::CredentialV2Display (line 578) - compile fail ... ok
+test src/profile.rs - profile::DisplayField (line 83) - compile fail ... ok
+test src/credential_v2/display.rs - credential_v2::display::CredentialV2Display (line 588) - compile fail ... ok
+test src/credential_v2/endpoint.rs - credential_v2::endpoint::CredentialV2RecoveredReceiptAuthority (line 107) - compile fail ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+

@@ -1,0 +1,24 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+    Finished `test` profile [unoptimized] target(s) in 1.04s
+     Running tests/credential_v2_display.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_display-7813efa1a6bacddf)
+
+running 1 test
+test ceremony_contact_is_truthful_and_cannot_be_supplied_by_peer_claims ... FAILED
+
+failures:
+
+---- ceremony_contact_is_truthful_and_cannot_be_supplied_by_peer_claims stdout ----
+
+thread 'ceremony_contact_is_truthful_and_cannot_be_supplied_by_peer_claims' (7782110) panicked at tests/credential_v2_display.rs:305:9:
+assertion `left == right` failed
+  left: TrustedPair
+ right: CeremonyGesture
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    ceremony_contact_is_truthful_and_cannot_be_supplied_by_peer_claims
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test credential_v2_display`

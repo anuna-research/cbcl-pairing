@@ -1,0 +1,668 @@
+[
+  {
+    "name": "word-domain",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "b\"selfsame-pairing-manual-words/v1\\0\"",
+        "b\"\""
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "word-domain.log"
+  },
+  {
+    "name": "c-mapping-domain",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "b\"SSPAIR-M1\\0\\0\\0\"",
+        "b\"SSPAIR-M2\\0\\0\\0\""
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "c-mapping-domain.log"
+  },
+  {
+    "name": "word-byte-order",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "u32::from_be_bytes(random)",
+        "u32::from_le_bytes(random)"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "word-byte-order.log"
+  },
+  {
+    "name": "uniform-mask",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "u32::from_be_bytes(random) & 0x3fff_ffff",
+        "u32::from_be_bytes(random)"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "uniform-mask.log"
+  },
+  {
+    "name": "packing-shift",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "u64::from(*n) << 3",
+        "u64::from(*n) << 2"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "packing-shift.log"
+  },
+  {
+    "name": "first-index-shift",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "[22, 11, 0]",
+        "[21, 11, 0]"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "first-index-shift.log"
+  },
+  {
+    "name": "second-index-shift",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "[22, 11, 0]",
+        "[22, 10, 0]"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "second-index-shift.log"
+  },
+  {
+    "name": "checksum-comparison",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "if !bool::from(checksum(*n).ct_eq(&((*bits & 7) as u8)))",
+        "if false && !bool::from(checksum(*n).ct_eq(&((*bits & 7) as u8)))"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "checksum-comparison.log"
+  },
+  {
+    "name": "bootstrap-domain",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "b\"selfsame-pairing-manual/v1\"",
+        "b\"selfsame-pairing-manual/v2\""
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "bootstrap-domain.log"
+  },
+  {
+    "name": "phrase-bound",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "if input.len() > MAX_PHRASE",
+        "if false && input.len() > MAX_PHRASE"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "phrase-bound.log"
+  },
+  {
+    "name": "bootstrap-bound",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "if input.len() > MAX_TEXT",
+        "if false && input.len() > MAX_TEXT"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "bootstrap-bound.log"
+  },
+  {
+    "name": "separator-language",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        ".split([' ', '\\t', '\\r', '\\n'])",
+        ".split_ascii_whitespace()"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "separator-language.log"
+  },
+  {
+    "name": "complete-bootstrap",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "if !parser.0.is_empty()",
+        "if false && !parser.0.is_empty()"
+      ],
+      [
+        "if bootstrap.encode()?.as_bytes() != input.as_bytes()",
+        "if false && bootstrap.encode()?.as_bytes() != input.as_bytes()"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "complete-bootstrap.log"
+  },
+  {
+    "name": "claim-commitment",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "if !bool::from(\n            claim_commitment",
+        "if false && !bool::from(\n            claim_commitment"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "claim-commitment.log"
+  },
+  {
+    "name": "allocator-key",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "if carrier.expected_allocator_key().is_none()",
+        "if false && carrier.expected_allocator_key().is_none()"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "allocator-key.log"
+  },
+  {
+    "name": "exclusive-expiry",
+    "source": "src/credential_v2/manual.rs",
+    "changes": [
+      [
+        "if now >= carrier.relay_expires_at()",
+        "if now > carrier.relay_expires_at()"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "exclusive-expiry.log"
+  },
+  {
+    "name": "authenticated-mode-encoding",
+    "source": "src/credential_v2/bootstrap.rs",
+    "changes": [
+      [
+        "CredentialV2AllocatorMode::Manual => 1,",
+        "CredentialV2AllocatorMode::Manual => 0,"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "credential_v2::bootstrap::tests"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "authenticated-mode-encoding.log"
+  },
+  {
+    "name": "expected-mode",
+    "source": "src/credential_v2/bootstrap.rs",
+    "changes": [
+      [
+        "if mode != expected_mode",
+        "if false && mode != expected_mode"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "credential_v2::bootstrap::tests"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "expected-mode.log"
+  },
+  {
+    "name": "old-restore-full",
+    "source": "src/credential_v2/bootstrap.rs",
+    "changes": [
+      [
+        "if tag == OLD_INNER_DOMAIN {\n            CredentialV2AllocatorMode::Full",
+        "if tag == OLD_INNER_DOMAIN {\n            CredentialV2AllocatorMode::Manual"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "credential_v2::bootstrap::tests"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "old-restore-full.log"
+  },
+  {
+    "name": "full-export",
+    "source": "src/credential_v2/bootstrap.rs",
+    "changes": [
+      [
+        "if self.mode != CredentialV2AllocatorMode::Full",
+        "if false && self.mode != CredentialV2AllocatorMode::Full"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "full-export.log"
+  },
+  {
+    "name": "legacy-export",
+    "source": "src/credential_v2/bootstrap.rs",
+    "changes": [
+      [
+        "(self.mode == CredentialV2AllocatorMode::Full)",
+        "(true)"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "legacy-export.log"
+  },
+  {
+    "name": "manual-export",
+    "source": "src/credential_v2/bootstrap.rs",
+    "changes": [
+      [
+        "if self.mode != CredentialV2AllocatorMode::Manual",
+        "if false && self.mode != CredentialV2AllocatorMode::Manual"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "manual-export.log"
+  },
+  {
+    "name": "pre-peer-zero-scalar",
+    "source": "src/credential_v2/allocator.rs",
+    "changes": [
+      [
+        ".then(|| Zeroizing::new(*fresh_cpace_scalar))",
+        ".then(|| Zeroizing::new([0; 32]))"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session",
+      "pre_peer_restore"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "pre-peer-zero-scalar.log"
+  },
+  {
+    "name": "retained-share-check",
+    "source": "src/credential_v2/bootstrap.rs",
+    "changes": [
+      [
+        "if bootstrap.cached_outbound.as_ref() != Some(&CredentialV2Frame::cpace(&message)?)",
+        "if false && bootstrap.cached_outbound.as_ref() != Some(&CredentialV2Frame::cpace(&message)?)"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "credential_v2::bootstrap::tests"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "retained-share-check.log"
+  },
+  {
+    "name": "retained-finished-check",
+    "source": "src/credential_v2/bootstrap.rs",
+    "changes": [
+      [
+        "if self.cached_outbound.as_ref() != Some(&pending.local_finished_frame())",
+        "if false && self.cached_outbound.as_ref() != Some(&pending.local_finished_frame())"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "credential_v2::bootstrap::tests"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "retained-finished-check.log"
+  },
+  {
+    "name": "one-distinct-peer",
+    "source": "src/credential_v2/allocator.rs",
+    "changes": [
+      [
+        "if bootstrap.peer_cpace() != Some(&frame)",
+        "if false && bootstrap.peer_cpace() != Some(&frame)"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "one-distinct-peer.log"
+  },
+  {
+    "name": "persistence-before-output",
+    "source": "src/credential_v2/allocator.rs",
+    "changes": [
+      [
+        "self.after_persist = after;\n        Ok(vec![CredentialV2AllocatorEffect::Checkpoint {",
+        "self.after_persist = after;\n        if !self.after_persist.is_empty() { return Ok(std::mem::take(&mut self.after_persist)); }\n        Ok(vec![CredentialV2AllocatorEffect::Checkpoint {"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "persistence-before-output.log"
+  },
+  {
+    "name": "blocked-reentrant-output",
+    "source": "src/credential_v2/allocator.rs",
+    "changes": [
+      [
+        "if self.persistence_gate.is_some() {\n            return Err(CredentialV2Error::Phase);\n        }\n        let result = decode_server_message",
+        "if false && self.persistence_gate.is_some() {\n            return Err(CredentialV2Error::Phase);\n        }\n        let result = decode_server_message"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "blocked-reentrant-output.log"
+  },
+  {
+    "name": "terminal-export",
+    "source": "src/credential_v2/allocator.rs",
+    "changes": [
+      [
+        "fn terminate(&mut self) {\n        self.state = AllocatorState::Terminal;",
+        "fn terminate(&mut self) {"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "terminal-export.log"
+  },
+  {
+    "name": "terminal-scalar-erasure",
+    "source": "src/credential_v2/allocator.rs",
+    "changes": [
+      [
+        "self.cpace_scalar = None;\n        self.wrapping_key.zeroize();",
+        "self.wrapping_key.zeroize();"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "terminal_input_erases"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "terminal-scalar-erasure.log"
+  },
+  {
+    "name": "terminal-presence-erasure",
+    "source": "src/credential_v2/allocator.rs",
+    "changes": [
+      [
+        "self.presence = None;\n        self.cpace_scalar = None;",
+        "self.cpace_scalar = None;"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "terminal_input_erases"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "terminal-presence-erasure.log"
+  },
+  {
+    "name": "terminal-key-erasure",
+    "source": "src/credential_v2/allocator.rs",
+    "changes": [
+      [
+        "self.wrapping_key.zeroize();",
+        ""
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "terminal_input_erases"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "terminal-key-erasure.log"
+  },
+  {
+    "name": "contact-provenance",
+    "source": "src/credential_v2/display.rs",
+    "changes": [
+      [
+        "tofu_state: authority.tofu_state,",
+        "tofu_state: CredentialV2TofuState::TrustedPair,"
+      ]
+    ],
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_display",
+      "ceremony_contact"
+    ],
+    "exit_code": 101,
+    "behavioral_red": true,
+    "log": "contact-provenance.log"
+  }
+]
