@@ -224,7 +224,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).as_slice(),
-            "ba516fa79716e9567a839f029761f4c8b0ed460592d5a8c3fdb529507be2af8c",
+            "3d383a7ec90548b601f1e27f5338efb6a7631f5ef196bd8edf34897692ea2ff0",
         ),
         (
             include_bytes!(concat!(

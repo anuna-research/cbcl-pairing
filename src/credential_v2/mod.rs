@@ -13,6 +13,7 @@ mod context;
 mod display;
 mod endpoint;
 mod frame;
+mod handoff;
 mod object;
 mod presence;
 
@@ -47,6 +48,7 @@ pub use endpoint::{
     CredentialV2Phase, CredentialV2RecoveredReceiptAuthority,
 };
 pub use frame::{decode_frame, encode_frame, CredentialV2Frame};
+pub use handoff::{CredentialV2Handoff, CredentialV2HandoffError};
 pub use object::{
     decode_object, CredentialV2Kind, CredentialV2Object, CONTROL_PADDING_BYTES, LARGE_PADDING_BYTES,
 };

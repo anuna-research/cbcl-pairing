@@ -1,0 +1,47 @@
+    Finished `test` profile [unoptimized] target(s) in 0.04s
+     Running tests/credential_v2_allocator_session.rs (/Volumes/ScanHandoffBuild/target/debug/deps/credential_v2_allocator_session-ba802b9d63cbbb8b)
+
+running 4 tests
+test carrier_and_checkpoint_are_withheld_on_allocation_mismatch_or_expiry ... ok
+test allocator_restores_the_bound_membership_and_only_the_cached_frame ... ok
+test allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame ... ok
+test allocator_releases_the_receipt_after_the_payload ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/credential_v2_bootstrap_checkpoint.rs (/Volumes/ScanHandoffBuild/target/debug/deps/credential_v2_bootstrap_checkpoint-1eabf7180f87298d)
+
+running 2 tests
+test test_065_allocator_bootstrap_checkpoint_requires_numeric_live_expiry_and_exact_bindings ... ok
+test test_065_allocator_restores_every_pre_finished_state_and_erases_presence_secrets ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/credential_v2_handoff.rs (/Volumes/ScanHandoffBuild/target/debug/deps/credential_v2_handoff-f795a055fbc74f67)
+
+running 8 tests
+test inner_carrier_errors_are_redacted_and_use_the_existing_recognizer ... ok
+test commitment_is_to_m_and_t_only_and_never_c_concatenated_with_t ... ok
+test lexical_version_size_and_encoding_failures_are_closed ... ok
+test commitment_guard_rejects_wrong_t_in_constructor ... ok
+test deterministic_vectors_preserve_exact_carrier_digest_and_independent_secrets ... ok
+test commitment_guard_rejects_wrong_t_in_recognizer ... ok
+test fixed_schema_rejects_noncanonical_nested_extra_and_truncated_input ... ok
+test valid_domain_properties_include_length_integer_key_and_secret_boundaries ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.41s
+
+     Running tests/credential_v2_handoff_session.rs (/Volumes/ScanHandoffBuild/target/debug/deps/credential_v2_handoff_session-145bfc516d79e62d)
+
+running 2 tests
+test closed_or_failed_session_with_retained_t_exports_nothing ... ok
+test exact_retained_handoff_is_available_until_claim_admission_before_finished ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/credential_v2_presence.rs (/Volumes/ScanHandoffBuild/target/debug/deps/credential_v2_presence-78889efeed5e98de)
+
+running 1 test
+test pair1_round_trips_independent_secrets_and_rejects_every_substitution ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

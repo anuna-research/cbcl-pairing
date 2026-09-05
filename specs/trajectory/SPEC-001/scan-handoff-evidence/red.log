@@ -1,0 +1,102 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-scan-handoff-2)
+    Finished `test` profile [unoptimized] target(s) in 0.18s
+     Running tests/credential_v2_handoff.rs (target/debug/deps/credential_v2_handoff-f795a055fbc74f67)
+
+running 7 tests
+test inner_carrier_errors_are_redacted_and_use_the_existing_recognizer ... FAILED
+test commitment_guard_rejects_wrong_t_in_constructor_and_recognizer ... FAILED
+test deterministic_vectors_preserve_exact_carrier_digest_and_independent_secrets ... FAILED
+test lexical_version_size_and_encoding_failures_are_closed ... FAILED
+test commitment_is_to_m_and_t_only_and_never_c_concatenated_with_t ... FAILED
+test fixed_schema_rejects_noncanonical_nested_extra_and_truncated_input ... FAILED
+test valid_domain_properties_include_length_integer_key_and_secret_boundaries ... FAILED
+
+failures:
+
+---- inner_carrier_errors_are_redacted_and_use_the_existing_recognizer stdout ----
+
+thread 'inner_carrier_errors_are_redacted_and_use_the_existing_recognizer' (6812066) panicked at tests/credential_v2_handoff.rs:52:5:
+assertion `left == right` failed
+  left: Schema
+ right: Carrier
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- commitment_guard_rejects_wrong_t_in_constructor_and_recognizer stdout ----
+
+thread 'commitment_guard_rejects_wrong_t_in_constructor_and_recognizer' (6812062) panicked at tests/credential_v2_handoff.rs:152:9:
+assertion `left == right` failed
+  left: Schema
+ right: Commitment
+
+---- deterministic_vectors_preserve_exact_carrier_digest_and_independent_secrets stdout ----
+
+thread 'deterministic_vectors_preserve_exact_carrier_digest_and_independent_secrets' (6812064) panicked at tests/credential_v2_handoff.rs:91:102:
+called `Result::unwrap()` on an `Err` value: Schema
+
+---- lexical_version_size_and_encoding_failures_are_closed stdout ----
+
+thread 'lexical_version_size_and_encoding_failures_are_closed' (6812067) panicked at tests/credential_v2_handoff.rs:52:5:
+assertion `left == right` failed
+  left: Schema
+ right: Version
+
+---- commitment_is_to_m_and_t_only_and_never_c_concatenated_with_t stdout ----
+
+thread 'commitment_is_to_m_and_t_only_and_never_c_concatenated_with_t' (6812063) panicked at tests/credential_v2_handoff.rs:60:98:
+called `Result::unwrap()` on an `Err` value: Schema
+
+---- fixed_schema_rejects_noncanonical_nested_extra_and_truncated_input stdout ----
+
+thread 'fixed_schema_rejects_noncanonical_nested_extra_and_truncated_input' (6812065) panicked at tests/credential_v2_handoff.rs:52:5:
+assertion `left == right` failed
+  left: Schema
+ right: Encoding
+
+---- valid_domain_properties_include_length_integer_key_and_secret_boundaries stdout ----
+
+thread 'valid_domain_properties_include_length_integer_key_and_secret_boundaries' (6812068) panicked at tests/credential_v2_handoff.rs:60:98:
+called `Result::unwrap()` on an `Err` value: Schema
+
+
+failures:
+    commitment_guard_rejects_wrong_t_in_constructor_and_recognizer
+    commitment_is_to_m_and_t_only_and_never_c_concatenated_with_t
+    deterministic_vectors_preserve_exact_carrier_digest_and_independent_secrets
+    fixed_schema_rejects_noncanonical_nested_extra_and_truncated_input
+    inner_carrier_errors_are_redacted_and_use_the_existing_recognizer
+    lexical_version_size_and_encoding_failures_are_closed
+    valid_domain_properties_include_length_integer_key_and_secret_boundaries
+
+test result: FAILED. 0 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--test credential_v2_handoff`
+     Running tests/credential_v2_handoff_session.rs (target/debug/deps/credential_v2_handoff_session-145bfc516d79e62d)
+
+running 2 tests
+test closed_or_failed_session_with_retained_t_exports_nothing ... FAILED
+test exact_retained_handoff_is_available_until_claim_admission_before_finished ... FAILED
+
+failures:
+
+---- closed_or_failed_session_with_retained_t_exports_nothing stdout ----
+
+thread 'closed_or_failed_session_with_retained_t_exports_nothing' (6812091) panicked at tests/credential_v2_handoff_session.rs:98:9:
+assertion failed: allocator.handoff_text().unwrap().is_some()
+
+---- exact_retained_handoff_is_available_until_claim_admission_before_finished stdout ----
+
+thread 'exact_retained_handoff_is_available_until_claim_admission_before_finished' (6812092) panicked at tests/credential_v2_handoff_session.rs:59:50:
+retained C/T can be exported after the committed allocation
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    closed_or_failed_session_with_retained_t_exports_nothing
+    exact_retained_handoff_is_available_until_claim_admission_before_finished
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--test credential_v2_handoff_session`
+error: 2 targets failed:
+    `--test credential_v2_handoff`
+    `--test credential_v2_handoff_session`

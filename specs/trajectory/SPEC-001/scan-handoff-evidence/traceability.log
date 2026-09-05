@@ -1,0 +1,42 @@
+{
+  "dead_links": [
+    {
+      "source": "scan-handoff-implementation-2026-09-05",
+      "line": 17,
+      "target": "SPEC-077-selfsame-scan-pairing",
+      "predicate": null
+    },
+    {
+      "source": "scan-handoff-implementation-2026-09-05",
+      "line": 18,
+      "target": "SPEC-077-selfsame-scan-pairing",
+      "predicate": null
+    },
+    {
+      "source": "scan-handoff-implementation-2026-09-05",
+      "line": 19,
+      "target": "SPEC-077-selfsame-scan-pairing",
+      "predicate": null
+    }
+  ],
+  "orphans": [],
+  "syntax_errors": [],
+  "spl_diagnostics": [],
+  "drift_diagnostics": [],
+  "predicate_lints": [],
+  "summary": {
+    "dead_links": 3,
+    "orphans": 0,
+    "syntax_errors": 0,
+    "spl_errors": 0,
+    "drift_warnings": 0,
+    "drift_info": 0,
+    "total_spl_blocks": 0,
+    "drifted_blocks_warning": 0,
+    "drifted_blocks_info": 0,
+    "explicitly_grounded_facts": 0,
+    "broken_groundings": 0,
+    "predicate_errors": 0,
+    "predicate_warnings": 0
+  }
+}

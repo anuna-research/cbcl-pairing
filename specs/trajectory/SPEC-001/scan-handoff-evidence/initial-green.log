@@ -1,0 +1,22 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-scan-handoff-2)
+    Finished `test` profile [unoptimized] target(s) in 1.05s
+     Running tests/credential_v2_handoff.rs (target/debug/deps/credential_v2_handoff-f795a055fbc74f67)
+
+running 7 tests
+test inner_carrier_errors_are_redacted_and_use_the_existing_recognizer ... ok
+test lexical_version_size_and_encoding_failures_are_closed ... ok
+test commitment_is_to_m_and_t_only_and_never_c_concatenated_with_t ... ok
+test deterministic_vectors_preserve_exact_carrier_digest_and_independent_secrets ... ok
+test commitment_guard_rejects_wrong_t_in_constructor_and_recognizer ... ok
+test fixed_schema_rejects_noncanonical_nested_extra_and_truncated_input ... ok
+test valid_domain_properties_include_length_integer_key_and_secret_boundaries ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.49s
+
+     Running tests/credential_v2_handoff_session.rs (target/debug/deps/credential_v2_handoff_session-145bfc516d79e62d)
+
+running 2 tests
+test closed_or_failed_session_with_retained_t_exports_nothing ... ok
+test exact_retained_handoff_is_available_until_claim_admission_before_finished ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s

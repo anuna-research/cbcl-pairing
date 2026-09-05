@@ -250,6 +250,18 @@ impl CredentialV2AllocatorBootstrap {
         self.presence.display_code()
     }
 
+    pub(super) fn handoff(&self) -> Result<Option<super::CredentialV2Handoff>, CredentialV2Error> {
+        let (c, t) = self.presence.checkpoint_parts();
+        t.map(|t| {
+            super::CredentialV2Handoff::new(
+                self.carrier.clone(),
+                super::CredentialV2PresenceCode::new(*c, *t.as_bytes()),
+            )
+            .map_err(|_| CredentialV2Error::Profile)
+        })
+        .transpose()
+    }
+
     /// Borrow the exact frame that recovery must retransmit before any advance.
     #[must_use]
     pub const fn cached_outbound_frame(&self) -> Option<&CredentialV2Frame> {
