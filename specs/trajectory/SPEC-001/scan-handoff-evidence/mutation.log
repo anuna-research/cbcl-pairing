@@ -1,0 +1,29 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-scan-handoff-2)
+    Finished `test` profile [unoptimized] target(s) in 8.33s
+     Running tests/credential_v2_handoff.rs (/Volumes/ScanHandoffBuild/target/debug/deps/credential_v2_handoff-f795a055fbc74f67)
+
+running 2 tests
+test commitment_guard_rejects_wrong_t_in_constructor ... FAILED
+test commitment_guard_rejects_wrong_t_in_recognizer ... FAILED
+
+failures:
+
+---- commitment_guard_rejects_wrong_t_in_constructor stdout ----
+
+thread 'commitment_guard_rejects_wrong_t_in_constructor' (6879906) panicked at tests/credential_v2_handoff.rs:201:18:
+called `Result::unwrap_err()` on an `Ok` value: CredentialV2Handoff([REDACTED])
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- commitment_guard_rejects_wrong_t_in_recognizer stdout ----
+
+thread 'commitment_guard_rejects_wrong_t_in_recognizer' (6879907) panicked at tests/credential_v2_handoff.rs:60:54:
+called `Result::unwrap_err()` on an `Ok` value: CredentialV2Handoff([REDACTED])
+
+
+failures:
+    commitment_guard_rejects_wrong_t_in_constructor
+    commitment_guard_rejects_wrong_t_in_recognizer
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test credential_v2_handoff`

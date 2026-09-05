@@ -2,6 +2,7 @@ use super::{CredentialV2Carrier, CredentialV2Error, CredentialV2Presence};
 use crate::wire::{claim_commitment, ClaimToken};
 use sha2::{Digest, Sha256};
 use std::{fmt, str::FromStr};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 const PREFIX: &str = "PAIR1";
 const DOMAIN: &[u8] = b"selfsame credential/v2 presence code\0";
@@ -15,6 +16,7 @@ const ENCODED_BITS: usize = 275;
 ///
 /// The value carries independent raw CPace and mailbox-claim secrets. It is
 /// never a machine-carrier member and exposes no secret accessor.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct CredentialV2PresenceCode {
     cpace_secret: [u8; 16],
     claim_token: [u8; 16],
@@ -46,8 +48,12 @@ impl CredentialV2PresenceCode {
         Ok(self)
     }
 
-    fn payload(&self) -> [u8; 34] {
-        let mut payload = [0_u8; 34];
+    pub(super) fn secrets(&self) -> (&[u8; 16], &[u8; 16]) {
+        (&self.cpace_secret, &self.claim_token)
+    }
+
+    fn payload(&self) -> Zeroizing<[u8; 34]> {
+        let mut payload = Zeroizing::new([0_u8; 34]);
         payload[..16].copy_from_slice(&self.cpace_secret);
         payload[16..32].copy_from_slice(&self.claim_token);
         let mut digest = Sha256::new();
@@ -95,7 +101,7 @@ impl FromStr for CredentialV2PresenceCode {
         if !input.is_ascii() {
             return Err(CredentialV2Error::Schema);
         }
-        let upper = input.to_ascii_uppercase();
+        let upper = Zeroizing::new(input.to_ascii_uppercase());
         let mut groups = upper.split('-');
         if groups.next() != Some(PREFIX) {
             return Err(CredentialV2Error::Schema);
@@ -104,8 +110,8 @@ impl FromStr for CredentialV2PresenceCode {
         if groups.len() != GROUPS || groups.iter().any(|group| group.len() != GROUP_OCTETS) {
             return Err(CredentialV2Error::Schema);
         }
-        let mut payload = [0_u8; 34];
-        for (symbol, character) in groups.concat().bytes().enumerate() {
+        let mut payload = Zeroizing::new([0_u8; 34]);
+        for (symbol, character) in groups.iter().flat_map(|group| group.bytes()).enumerate() {
             let value = ALPHABET
                 .iter()
                 .position(|candidate| *candidate == character)
@@ -120,11 +126,9 @@ impl FromStr for CredentialV2PresenceCode {
                 }
             }
         }
-        let mut cpace_secret = [0_u8; 16];
-        cpace_secret.copy_from_slice(&payload[..16]);
-        let mut claim_token = [0_u8; 16];
-        claim_token.copy_from_slice(&payload[16..32]);
-        let value = Self::new(cpace_secret, claim_token);
+        let mut value = Self::new([0; 16], [0; 16]);
+        value.cpace_secret.copy_from_slice(&payload[..16]);
+        value.claim_token.copy_from_slice(&payload[16..32]);
         if value.payload()[32..] != payload[32..] {
             return Err(CredentialV2Error::Profile);
         }

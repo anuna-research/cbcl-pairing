@@ -290,6 +290,20 @@ impl CredentialV2AllocatorSession {
         }
     }
 
+    /// Export the exact retained carrier and presence for confidential local transfer.
+    /// Returns `None` before relay allocation, after claim admission, or when closed.
+    /// The shell controls display timing after checkpoint and application commits,
+    /// and clears displayed text at the retained carrier's original expiry.
+    pub fn handoff_text(&self) -> Result<Option<Zeroizing<String>>, CredentialV2Error> {
+        let AllocatorState::Bootstrap(bootstrap) = &self.state else {
+            return Ok(None);
+        };
+        bootstrap
+            .handoff()?
+            .map(|handoff| handoff.encode().map_err(|_| CredentialV2Error::Schema))
+            .transpose()
+    }
+
     /// Return the protected channel transcript after Finished.
     #[must_use]
     pub fn transcript_hash(&self) -> Option<[u8; 64]> {

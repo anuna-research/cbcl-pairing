@@ -13,6 +13,23 @@ exchange, shared-point, intermediate-session-key, and X25519 input vectors from
 Those are draft-author vectors, not independently generated vectors. An
 independent CPace vector source and the required human cryptography review
 remain absent.
+
+## Confidential credential/v2 handoff vectors
+
+`credential-v2-handoff.json` fixes small and maximum handoffs with synthetic C/T,
+public carrier bytes, public SHA-256 digests, decoded wrapper bytes and exact text.
+It covers [[SPEC-077-selfsame-scan-pairing#TEST-001]] and
+[[SPEC-001-reusable-blind-pairing#REQ-031]]. The maximum carrier is 2695 bytes;
+its wrapper is 2762 decoded bytes and 3691 text bytes.
+
+`python3 tests/support/handoff_vectors.py` reproduces the JSON using Python
+stdlib CBOR construction, SHA-256 and base64url independently of the Rust codec.
+`cargo test --locked --test credential_v2_handoff` checks these vectors and the
+generated valid domain. `cargo run --locked --example credential_v2_handoff_fuzz -- 10000`
+runs the bounded recognizer harness with synthetic inputs up to 4096 bytes.
+
+Real handoffs are confidential. The public carrier and its digest retain their
+existing identity; the handoff text belongs only on explicit private transfer surfaces.
 ## Independent endpoint vector
 
 `tools/reference_endpoint.py` is the executable public TEST-018 vector. It is
