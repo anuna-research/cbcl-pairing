@@ -14,6 +14,7 @@ mod display;
 mod endpoint;
 mod frame;
 mod handoff;
+mod inspection;
 mod manual;
 mod object;
 mod presence;
@@ -51,6 +52,7 @@ pub use endpoint::{
 };
 pub use frame::{decode_frame, encode_frame, CredentialV2Frame};
 pub use handoff::{CredentialV2Handoff, CredentialV2HandoffError};
+pub use inspection::CredentialV2AllocatorCheckpointInspection;
 pub use manual::{CredentialV2ManualBootstrap, CredentialV2ManualError, CredentialV2ManualWords};
 pub use object::{
     decode_object, CredentialV2Kind, CredentialV2Object, CONTROL_PADDING_BYTES, LARGE_PADDING_BYTES,

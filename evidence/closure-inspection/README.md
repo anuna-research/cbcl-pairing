@@ -1,0 +1,13 @@
+# Authenticated closure inspection
+
+Requirement-localized repair for SPEC078 CON004/005 and TEST004/006. An expired saved allocator must remain inspectable for exact authenticated hub closure without reviving CPace, relay, exporter or issuance authority. The new opaque projection shares canonical authenticated checkpoint decoding; ordinary restore still refuses at the exclusive deadline. It exposes only phase, authenticated bootstrap mode, retained peer object, transcript, public receipt commitment and authenticated terminal Receipt intent/content hashes. Temporary channel/bootstrap secrets are dropped before return.
+
+Bootstrap profile digest is checked directly. Established body bindings are exactly those retained and checked by the caller verifier; a Begin checkpoint has no independent application profile digest. Request and intent supplied by a consumer are not independently retained at every phase. Consumers must authenticate signed offer context before interpreting these as application facts. This repair adds no fields or wire versions.
+
+Receipt plaintext may already be retired. Terminal inspection therefore returns its authenticated intent and content hashes. A consumer must reconstruct a canonical candidate Receipt from its candidate final status, compare the content hash, and verify the signed final status before relying on it. The hash proves the sealed transition, not relay delivery. The local expiry hint never authorizes deletion or replacement.
+
+`all-features.log` records cargo test --offline --all-features. `clippy.log` records cargo clippy --offline --all-features --all-targets -- -D warnings. `summary.json` derives the aggregate count. The real session tests cover Full/Manual bootstrap and application checkpoints, equality/after expiry, missing/mutated authenticated bindings and malformed shape; bootstrap decoder tests extend existing oldFull and cached-state rejection. Two compile-fail doctests reject live execution/export. Existing application fixtures here validate protocol sequencing; actual Selfsame signatures and final-status semantics belong to the separate WASM consumer tests.
+
+Six executed mutations and their behavioral failures are recorded in mutations.json and named logs; reproduce with CARGO_TARGET_DIR=<scratch-target> python3 tools/run-closure-inspection-mutations.py from an isolated checkout. The script restores each source in finally. The initial terminal test exposed that Receipt bytes had already been retired; the projection and test were corrected to authenticate the retained Receipt hashes. No reconstructed Payload or browser metadata is treated as sealed authority.
+
+Independent review and consumer integration remain separate acceptance gates.

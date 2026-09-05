@@ -1,0 +1,16 @@
+{
+  "allFeatures": {
+    "passed": 180,
+    "failed": 0,
+    "suites": 33
+  },
+  "clippy": {
+    "allFeatures": true,
+    "allTargets": true,
+    "denyWarnings": true,
+    "exitCode": 0
+  },
+  "behavioralMutantsKilled": 6,
+  "sourceBase": "ffb348d2d840dcc43d6ead2681b5fbf9a886e363",
+  "schemaChanges": false
+}

@@ -142,6 +142,28 @@ pub(super) fn open_checkpoint_plaintext(
     expected_generation: u64,
     now: u64,
 ) -> Result<OpenedCheckpoint, CredentialV2Error> {
+    open_checkpoint_for(input, wrapping_key, expected_side, expected_carrier,
+        expected_generation, CheckpointPurpose::ResumeAt(now))
+}
+
+// Inspection never escapes as a live endpoint. Only the closed projection in
+// `inspection` may call this path; ordinary restore always supplies real time.
+#[derive(Clone, Copy)]
+enum CheckpointPurpose { ResumeAt(u64), Inspect }
+
+pub(super) fn inspect_checkpoint_plaintext(
+    input: &[u8], wrapping_key: &[u8; 32], expected_carrier: &CredentialV2Carrier,
+    expected_generation: u64,
+) -> Result<OpenedCheckpoint, CredentialV2Error> {
+    open_checkpoint_for(input, wrapping_key, Side::Allocator, expected_carrier,
+        expected_generation, CheckpointPurpose::Inspect)
+}
+
+fn open_checkpoint_for(
+    input: &[u8], wrapping_key: &[u8; 32], expected_side: Side,
+    expected_carrier: &CredentialV2Carrier, expected_generation: u64,
+    purpose: CheckpointPurpose,
+) -> Result<OpenedCheckpoint, CredentialV2Error> {
     let outer = decode_outer(input)?;
     if outer.side != expected_side
         || outer.ceremony != *expected_carrier.carrier_ceremony_id()
@@ -150,8 +172,10 @@ pub(super) fn open_checkpoint_plaintext(
     {
         return Err(CredentialV2Error::Profile);
     }
-    if outer.expiry.is_some_and(|expiry| now >= expiry) {
-        return Err(CredentialV2Error::Expired);
+    if let CheckpointPurpose::ResumeAt(now) = purpose {
+        if outer.expiry.is_some_and(|expiry| now >= expiry) {
+            return Err(CredentialV2Error::Expired);
+        }
     }
     let aad = checkpoint_aad(outer.side, &outer.ceremony, outer.generation, outer.expiry)?;
     let key = derive_key(outer.side, &outer.ceremony, wrapping_key)?;
@@ -263,6 +287,26 @@ impl CredentialV2Endpoint {
             relay,
         })
     }
+}
+
+// Decode an authenticated allocator state for an immediately consumed read-only
+// projection. This is private to the credential/v2 implementation and is not a
+// recovery/issuance API. Shape/terminal rules remain enforced despite expiry.
+pub(super) fn inspect_allocator_endpoint(
+    input: &[u8], wrapping_key: &[u8; 32], carrier: &CredentialV2Carrier,
+    generation: u64, body_verifier: Box<dyn CredentialV2BodyVerifier>,
+) -> Result<RestoredCredentialV2Endpoint, CredentialV2Error> {
+    let opened = inspect_checkpoint_plaintext(input, wrapping_key, carrier, generation)?;
+    let (endpoint, channel, relay) = decode_inner(
+        &opened.plaintext, Side::Allocator, carrier, generation, opened.nonce, body_verifier,
+    )?;
+    if endpoint.phase == CredentialV2Phase::Terminal && !endpoint.receipt_released() {
+        return Err(CredentialV2Error::Terminal);
+    }
+    if opened.expiry != Some(carrier.relay_expires_at()) {
+        return Err(CredentialV2Error::Schema);
+    }
+    Ok(RestoredCredentialV2Endpoint { endpoint, channel, relay })
 }
 
 struct Outer {

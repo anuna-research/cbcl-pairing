@@ -1,0 +1,34 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-closure-inspection)
+warning: variant `Inspect` is never constructed
+   --> src/credential_v2/checkpoint.rs:152:41
+    |
+152 | enum CheckpointPurpose { ResumeAt(u64), Inspect }
+    |      -----------------                  ^^^^^^^
+    |      |
+    |      variant in this enum
+    |
+    = note: `CheckpointPurpose` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cbcl-pairing` (lib) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 3.30s
+     Running tests/credential_v2_manual_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_manual_session-4c3f4c6c3e64c7cb)
+
+running 1 test
+test closure_inspection_authenticates_expired_bootstrap_without_live_authority ... FAILED
+
+failures:
+
+---- closure_inspection_authenticates_expired_bootstrap_without_live_authority stdout ----
+
+thread 'closure_inspection_authenticates_expired_bootstrap_without_live_authority' (8191706) panicked at tests/credential_v2_manual_session.rs:405:47:
+called `Result::unwrap()` on an `Err` value: Expired
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    closure_inspection_authenticates_expired_bootstrap_without_live_authority
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--test credential_v2_manual_session`
