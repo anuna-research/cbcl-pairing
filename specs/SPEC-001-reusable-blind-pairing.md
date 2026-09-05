@@ -4,8 +4,8 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.8-draft
-last-updated: 2026-08-25
+version: 0.5.9-draft
+last-updated: 2026-09-05
 owner-repo: cbcl-pairing
 implementation-status: credential-v1-local-complete; credential-v2-local-complete
 implementation-baseline: 62ef4a968b46b4836374fcee1d78c410f730a7a7
@@ -14,9 +14,9 @@ derived-from: cbcl-bus SPEC-072 v0.3.4 at 9b966e04d0a8e21ecc0fe9f8de508f953574ed
 source-spec-sha256: 6fa3c9541aeebd039013413e063592a8903fc5a44d26d051f4ca2520bc35369e
 review-gate: production-not-approved
 authority-form: consolidated-current-protocol-and-consumer-pointer
-consumer-design: selfsame SPEC-008 0.5.17-draft
-coordinated-safety-design: selfsame SPEC-007 0.3.8-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.13-draft
+consumer-design: selfsame SPEC-008 0.5.18-draft
+coordinated-safety-design: selfsame SPEC-007 0.3.9-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.14-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
@@ -1482,6 +1482,19 @@ The credential/v2 machine carrier SHALL contain no CPace secret, claim bearer,
 or `PAIR1-` text. A separate typed presence input supplies raw sixteen-octet
 values `C` and `T`.
 
+The confidential local handoff is a distinct typed wrapper, not a machine carrier.
+An application MAY encode the exact public carrier and independent C/T together as
+`SSPAIR1:` followed by canonical unpadded base64url of deterministic CBOR
+`["selfsame-pairing-handoff/v1", carrier:bstr, C:bstr16, T:bstr16]`.
+The wrapper is at most 2762 decoded bytes and 3691 text bytes; the existing
+carrier domain is at most 2695 bytes. Recognition checks the bound before
+allocation, rejects noncanonical/extra/trailing input, and verifies the existing
+claim commitment. Secret-bearing owned storage is zeroized; Debug/errors redact.
+This wrapper is confidential bootstrap material: disclosure enables a pairing
+attempt, without granting account or identity authority. It never becomes the
+public carrier, public digest, relay member, or unsealed persistent state.
+The original public carrier language, CPace inputs, and relay wire stay identical.
+
 Only `C` enters CPace. Only `T` authenticates the claimant mailbox admission.
 The carrier and presence input cannot substitute for each other.
 
@@ -1834,10 +1847,10 @@ permissions, device binding, exact-pair TOFU state, transition, and signed
 offer-core digest.
 
 For the Selfsame profile, `CredentialV2IntentInput` is constructed only from
-the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.13-draft
+the completely recognised offer logical body: cbcl-bus SPEC-053 0.17.14-draft
 CON-012's `signed-offer-v2` and its exact `OfferCoreV2`. The other ten body
 kinds cannot construct or amend an intent input. The consumer's nine successor
-body grammars are Selfsame SPEC-008 0.5.17-draft CON-987.
+body grammars are Selfsame SPEC-008 0.5.18-draft CON-987.
 
 The profile first parses one bounded peer `CredentialV2IntentInput`. Before any
 display allocation, it SHALL require byte equality between every overlapping
@@ -2188,9 +2201,9 @@ pointer, one current hub pointer, and one current test set.
 The current test set contains TEST-001 through TEST-029 and TEST-060 through
 TEST-067. No trajectory test supplies current authority.
 
-The current consumer is Selfsame SPEC-008 0.5.17-draft. The current safety
-authority is Selfsame SPEC-007 0.3.8-draft. The current hub design is cbcl-bus
-SPEC-053 0.17.13-draft.
+The current consumer is Selfsame SPEC-008 0.5.18-draft. The current safety
+authority is Selfsame SPEC-007 0.3.9-draft. The current hub design is cbcl-bus
+SPEC-053 0.17.14-draft.
 
 All four coordinated parents record the same generation metadata and review
 set.
@@ -2389,10 +2402,24 @@ required Tier-1 review.
 - The reference relay shells do not terminate TLS or export metrics.
 - This draft does not claim formal cryptographic proof or production approval.
 
+## Scan-handoff local implementation evidence — 0.5.9-draft
+
+The owner authorized local implementation on 2026-09-05. The coordinated
+application contract is cbcl-bus SPEC-077 0.1.1, with Selfsame SPEC-008 0.5.18,
+SPEC-007 0.3.9, and cbcl-bus SPEC-053 0.17.14.
+Required new assets are deterministic handoff vectors, valid-domain property
+tests, malformed-input and commitment rejection, and a recognizer fuzz target.
+Existing relay/CPace vectors remain unchanged. Evidence is pending implementation;
+this revision makes no test-pass or production-review claim. Consumers pin the
+resulting library commit before integration acceptance. Old public carriers and
+explicit legacy input retain their encodings; old clients cannot consume SSPAIR1.
+
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.5.8-draft</summary>
+<summary>Revision history — 0.1.0 → 0.5.9-draft</summary>
+
+- 0.5.9-draft — specifies a confidential local scan handoff around the unchanged public carrier, with explicit disclosure policy, bounds and recognition evidence. Local implementation is authorized; production gates remain effective.
 
 - 0.5.8-draft — reissues the unchanged credential/v2 protocol against the
   coordinated Selfsame 0.5.17, safety 0.3.8, and hub 0.17.13 authorities. The
