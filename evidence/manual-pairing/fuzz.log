@@ -1,0 +1,9 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+    Finished `dev` profile [unoptimized] target(s) in 3.29s
+     Running `/Volumes/anuna-03/codex-spec078-pairing-target/debug/examples/credential_v2_manual_fuzz 10000`
+seed=0x07800002cafef00d iterations=10000 max_input=4096
+bootstrap outcomes (ok/version/oversize/encoding/schema/carrier/commitment/expired/key/nonutf8)=[11093, 9004, 2073, 1, 5010, 10612, 2211, 3, 1, 9994]
+phrase outcomes (ok/oversize/encoding/schema/checksum)=[21278, 9695, 1, 10267, 8766]

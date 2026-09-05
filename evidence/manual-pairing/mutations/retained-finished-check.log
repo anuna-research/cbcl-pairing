@@ -1,0 +1,25 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+    Finished `test` profile [unoptimized] target(s) in 0.80s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/cbcl_pairing-215f7e2f81de7aa0)
+
+running 3 tests
+test credential_v2::bootstrap::tests::inner_tag_is_exact_v3_mode_only_and_old_v2_restores_full_only ... ok
+test credential_v2::bootstrap::tests::every_old_bootstrap_phase_restores_only_full_with_exact_cached_frames ... ok
+test credential_v2::bootstrap::tests::retained_scalar_and_cached_share_are_checked_before_any_recovered_output ... FAILED
+
+failures:
+
+---- credential_v2::bootstrap::tests::retained_scalar_and_cached_share_are_checked_before_any_recovered_output stdout ----
+
+thread 'credential_v2::bootstrap::tests::retained_scalar_and_cached_share_are_checked_before_any_recovered_output' (7780162) panicked at src/credential_v2/bootstrap/tests.rs:137:9:
+assertion failed: restore(&s, seal(&s, &bad).as_bytes(),
+        CredentialV2AllocatorMode::Manual).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    credential_v2::bootstrap::tests::retained_scalar_and_cached_share_are_checked_before_any_recovered_output
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `--lib`

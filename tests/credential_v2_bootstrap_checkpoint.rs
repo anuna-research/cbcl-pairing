@@ -40,6 +40,7 @@ fn allocator() -> CredentialV2AllocatorBootstrap {
         CredentialV2Presence::new(CPACE_SECRET, CLAIM),
         PROFILE_DIGEST,
         CredentialV2RelayState::new(MEMBERSHIP),
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
     )
     .unwrap()
 }
@@ -51,6 +52,7 @@ fn restore(checkpoint: &[u8], generation: u64) -> CredentialV2AllocatorBootstrap
         &carrier(),
         generation,
         NOW,
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
     )
     .unwrap()
 }
@@ -179,6 +181,7 @@ fn test_065_allocator_bootstrap_checkpoint_requires_numeric_live_expiry_and_exac
         &carrier(),
         1,
         NOW,
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
     )
     .is_err());
     assert!(CredentialV2AllocatorBootstrap::restore_checkpoint(
@@ -187,6 +190,7 @@ fn test_065_allocator_bootstrap_checkpoint_requires_numeric_live_expiry_and_exac
         &carrier(),
         2,
         NOW,
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
     )
     .is_err());
     assert!(CredentialV2AllocatorBootstrap::restore_checkpoint(
@@ -195,6 +199,7 @@ fn test_065_allocator_bootstrap_checkpoint_requires_numeric_live_expiry_and_exac
         &carrier(),
         1,
         EXPIRY,
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
     )
     .is_err());
 }

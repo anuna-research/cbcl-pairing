@@ -85,10 +85,13 @@ impl CredentialV2DeviceBinding {
     }
 }
 
-/// Person-owned trust state for this exact application and relay pair.
+/// Consumer-owned contact provenance for this exact application and relay pair.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum CredentialV2TofuState {
+    /// An explicit complete-entry gesture permits this ceremony's contact only.
+    /// This neither asserts remembered trust nor authorizes a trust-row write.
+    CeremonyGesture,
     /// This exact pair is being considered for the first time.
     NewPair,
     /// The person previously accepted this exact pair.
@@ -543,7 +546,7 @@ impl CredentialV2IntentAuthority {
         self.claims.device_binding()
     }
 
-    /// Return the person-owned state of this exact application and relay pair.
+    /// Return the consumer-owned contact provenance for this exact pair.
     #[must_use]
     pub const fn tofu_state(&self) -> CredentialV2TofuState {
         self.tofu_state
@@ -638,7 +641,7 @@ impl CredentialV2Display {
         self.claims.device_binding()
     }
 
-    /// Return the person-owned exact-pair TOFU state.
+    /// Return the consumer-owned contact provenance, including ceremony-only contact.
     #[must_use]
     pub const fn tofu_state(&self) -> CredentialV2TofuState {
         self.tofu_state

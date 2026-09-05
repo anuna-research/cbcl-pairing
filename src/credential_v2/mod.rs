@@ -14,6 +14,7 @@ mod display;
 mod endpoint;
 mod frame;
 mod handoff;
+mod manual;
 mod object;
 mod presence;
 
@@ -21,7 +22,8 @@ pub use allocator::{
     CredentialV2AllocatorEffect, CredentialV2AllocatorSession, CredentialV2AllocatorSessionInput,
 };
 pub use bootstrap::{
-    CredentialV2AllocatorBootstrap, CredentialV2AllocatorBootstrapPhase, CredentialV2RelayState,
+    CredentialV2AllocatorBootstrap, CredentialV2AllocatorBootstrapPhase, CredentialV2AllocatorMode,
+    CredentialV2RelayState,
 };
 pub use carrier::{
     decode_carrier, encode_carrier, CredentialV2Carrier, CredentialV2CarrierInput,
@@ -49,6 +51,7 @@ pub use endpoint::{
 };
 pub use frame::{decode_frame, encode_frame, CredentialV2Frame};
 pub use handoff::{CredentialV2Handoff, CredentialV2HandoffError};
+pub use manual::{CredentialV2ManualBootstrap, CredentialV2ManualError, CredentialV2ManualWords};
 pub use object::{
     decode_object, CredentialV2Kind, CredentialV2Object, CONTROL_PADDING_BYTES, LARGE_PADDING_BYTES,
 };

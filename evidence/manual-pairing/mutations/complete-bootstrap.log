@@ -1,0 +1,29 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+    Finished `test` profile [unoptimized] target(s) in 1.11s
+     Running tests/credential_v2_manual.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_manual-27d17ce3847ac128)
+
+running 8 tests
+test phrase_normalization_is_exactly_ascii_case_and_four_separators ... ok
+test independent_word_vectors_pin_list_hash_indices_checksum_mapping_and_mask ... ok
+test formats_never_fall_back_to_another_recognizer ... ok
+test bootstrap_lexical_bounds_and_canonical_encoding_are_closed ... ok
+test independent_real_cpace_and_finished_vector_uses_unchanged_context ... ok
+test independent_bootstrap_vectors_have_no_c_or_verifier_and_exact_bounds ... ok
+test carrier_commitment_key_and_exclusive_expiry_precede_typed_input ... ok
+test bootstrap_fixed_schema_rejects_nesting_extras_nonminimal_lengths_and_truncation ... FAILED
+
+failures:
+
+---- bootstrap_fixed_schema_rejects_nesting_extras_nonminimal_lengths_and_truncation stdout ----
+
+thread 'bootstrap_fixed_schema_rejects_nesting_extras_nonminimal_lengths_and_truncation' (7776781) panicked at tests/credential_v2_manual.rs:58:45:
+called `Result::unwrap_err()` on an `Ok` value: CredentialV2ManualBootstrap([REDACTED])
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    bootstrap_fixed_schema_rejects_nesting_extras_nonminimal_lengths_and_truncation
+
+test result: FAILED. 7 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `--test credential_v2_manual`

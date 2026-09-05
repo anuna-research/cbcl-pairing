@@ -159,7 +159,7 @@ impl FromStr for CredentialV2Handoff {
 }
 
 // All callers supply at most MAX_CARRIER (< u16::MAX) bytes.
-fn append_bstr(output: &mut Vec<u8>, bytes: &[u8]) {
+pub(super) fn append_bstr(output: &mut Vec<u8>, bytes: &[u8]) {
     match bytes.len() {
         0..=23 => output.push(0x40 | bytes.len() as u8),
         24..=255 => output.extend_from_slice(&[0x58, bytes.len() as u8]),
@@ -174,7 +174,7 @@ fn append_bstr(output: &mut Vec<u8>, bytes: &[u8]) {
 // A nonrecursive recognizer for just the fixed array's string members. It
 // borrows slices, never allocates, and rejects nonminimal / indefinite lengths,
 // tags, containers and all length encodings exceeding this bounded language.
-struct SchemaParser<'a>(&'a [u8]);
+pub(super) struct SchemaParser<'a>(pub(super) &'a [u8]);
 
 impl<'a> SchemaParser<'a> {
     fn take(&mut self, length: usize) -> Result<&'a [u8], CredentialV2HandoffError> {
@@ -186,11 +186,11 @@ impl<'a> SchemaParser<'a> {
         Ok(value)
     }
 
-    fn byte(&mut self) -> Result<u8, CredentialV2HandoffError> {
+    pub(super) fn byte(&mut self) -> Result<u8, CredentialV2HandoffError> {
         Ok(self.take(1)?[0])
     }
 
-    fn string(&mut self, major: u8) -> Result<&'a [u8], CredentialV2HandoffError> {
+    pub(super) fn string(&mut self, major: u8) -> Result<&'a [u8], CredentialV2HandoffError> {
         let head = self.byte()?;
         if head >> 5 != major {
             return Err(CredentialV2HandoffError::Schema);

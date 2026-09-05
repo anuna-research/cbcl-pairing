@@ -1,0 +1,114 @@
+{
+  "scope": "bounded pairing-manual worker; not independent or production acceptance",
+  "environment": {
+    "CARGO_TARGET_DIR": "/Volumes/anuna-03/codex-spec078-pairing-target",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0"
+  },
+  "measured_tests": {
+    "library-integration-doc": {
+      "passed": 176,
+      "failed": 0,
+      "ignored": 0
+    },
+    "restored-focused-green": {
+      "passed": 45,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "behavioral_mutants": 33,
+  "gates": [
+    {
+      "gate": "focused behavioral verification",
+      "result": "pass",
+      "command": "cargo test --offline --lib --test credential_v2_manual --test credential_v2_manual_session --test credential_v2_allocator_session --test credential_v2_bootstrap_checkpoint --test credential_v2_handoff --test credential_v2_handoff_session --test credential_v2_display",
+      "exit_code": 0,
+      "evidence": "restored-focused-green.log"
+    },
+    {
+      "gate": "library/integration/doc compatibility",
+      "result": "pass",
+      "command": "cargo test --offline --all-features",
+      "exit_code": 0,
+      "evidence": "library-integration-doc.log"
+    },
+    {
+      "gate": "targeted behavioral red",
+      "result": "pass",
+      "command": "python3 -B tools/run-manual-mutations.py",
+      "exit_code": 0,
+      "evidence": "mutations/results.json"
+    },
+    {
+      "gate": "bounded fuzz/property",
+      "result": "pass",
+      "command": "cargo run --offline --example credential_v2_manual_fuzz -- 10000",
+      "exit_code": 0,
+      "evidence": "fuzz.log"
+    },
+    {
+      "gate": "clippy",
+      "result": "pass",
+      "command": "cargo clippy --offline --all-features --all-targets -- -D warnings",
+      "exit_code": 0,
+      "evidence": "clippy.log"
+    },
+    {
+      "gate": "independent vector reproducibility",
+      "result": "pass",
+      "command": "python3 -B tests/support/manual_vectors.py; compare output bytes to vectors/credential-v2-manual.json",
+      "exit_code": 0,
+      "evidence": "vector-reproduction.log"
+    },
+    {
+      "gate": "new Rust file formatting",
+      "result": "pass",
+      "command": [
+        "rustfmt",
+        "--edition",
+        "2021",
+        "--check",
+        "src/credential_v2/manual.rs",
+        "src/credential_v2/allocator/tests.rs",
+        "src/credential_v2/bootstrap/tests.rs",
+        "tests/credential_v2_manual.rs",
+        "tests/credential_v2_manual_session.rs",
+        "examples/credential_v2_manual_fuzz.rs"
+      ],
+      "exit_code": 0,
+      "evidence": "gates.json: executed subprocess exits"
+    },
+    {
+      "gate": "diff whitespace",
+      "result": "pass",
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "gates.json: executed subprocess exits"
+    },
+    {
+      "gate": "evidence descriptive lint",
+      "result": "pass",
+      "command": "usdd-lint.sh --type descriptive --json evidence/manual-pairing-2026-09-05.md",
+      "exit_code": 0,
+      "evidence": "evidence-lint.json",
+      "limitation": "three nonblocking long-sentence warnings"
+    },
+    {
+      "gate": "vault traceability",
+      "result": "fail",
+      "command": "NO_COLOR=true zetl -d specs --no-cache check --dead-links --fail-on error --json",
+      "exit_code": 1,
+      "evidence": "vault-check.json",
+      "owner": "root",
+      "limitation": "unchanged earlier scan-handoff evidence links to external SPEC-077; no specification modified"
+    },
+    {
+      "gate": "independent review/Circus acceptance/consumer depth/production approval",
+      "result": "unverified",
+      "owner": "root",
+      "evidence": "outside the bounded worker assignment; durable note records handoff and acceptance boundary"
+    }
+  ]
+}
