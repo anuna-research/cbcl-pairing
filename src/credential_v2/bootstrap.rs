@@ -115,6 +115,15 @@ impl CredentialV2RelayState {
         self.awaiting_ack
     }
 
+    /// Exact Put retries receive another relay acknowledgement. Only sequences
+    /// already acknowledged by this retained, contiguous projection are inert.
+    pub(super) fn acknowledgement_already_applied(&self, sequence: u8) -> bool {
+        let Some(last_sent) = self.next_local_sequence.checked_sub(1) else {
+            return false;
+        };
+        sequence < last_sent || (sequence == last_sent && !self.awaiting_ack)
+    }
+
     pub(super) fn cache_application_frame(
         &mut self,
         frame: CredentialV2Frame,

@@ -515,6 +515,11 @@ impl CredentialV2ClaimantSession {
         else {
             return Err(CredentialV2Error::Phase);
         };
+        if self.relay_ref()?.acknowledgement_already_applied(seq) {
+            // Existing persistence/phase and pre-payload expiry gates above
+            // still apply. No new checkpoint, generation or nonce is consumed.
+            return Ok(Vec::new());
+        }
         self.local_ack(seq)?;
         let expiry = match endpoint_phase {
             CredentialV2Phase::FinalApproved => Some(self.carrier.relay_expires_at()),
@@ -849,6 +854,9 @@ impl CredentialV2ClaimantSession {
         &mut self,
         sequence: u8,
     ) -> Result<Vec<CredentialV2ClaimantEffect>, CredentialV2Error> {
+        if self.relay_ref()?.acknowledgement_already_applied(sequence) {
+            return Ok(Vec::new());
+        }
         if self.phase == ClaimantPhase::Established {
             self.relay_mut()?.acknowledge_application_frame(sequence)?;
             return Ok(Vec::new());

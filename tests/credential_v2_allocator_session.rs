@@ -986,6 +986,19 @@ fn assert_receipt_flow(mode: cbcl_pairing::credential_v2::CredentialV2AllocatorM
 
     let offer = CredentialV2Object::new(CredentialV2Kind::Offer, [0x51; 32], vec![0xa0]).unwrap();
     let generation = release(&mut allocator, &offer, 2, generation, 0x70);
+    for seq in [0, 1, 2] {
+        assert!(
+            allocator
+                .receive(
+                    &server(ServerMessage::Acknowledged { seq }),
+                    NOW,
+                    CredentialV2CheckpointNonce::from_csprng([0x72; 12]),
+                )
+                .unwrap()
+                .is_empty(),
+            "known stored Ack cannot repeat an application checkpoint"
+        );
+    }
     let intent_approve = fixture_successor(CredentialV2Kind::IntentApprove, &offer);
     let generation = deliver(
         &mut allocator,
@@ -1006,6 +1019,14 @@ fn assert_receipt_flow(mode: cbcl_pairing::credential_v2::CredentialV2AllocatorM
     );
     let comparison = fixture_successor(CredentialV2Kind::ComparisonConfirmed, &preparation);
     let generation = release(&mut allocator, &comparison, 3, generation, 0x74);
+    assert!(allocator
+        .receive(
+            &server(ServerMessage::Acknowledged { seq: 3 }),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x76; 12]),
+        )
+        .unwrap()
+        .is_empty());
     let final_approve = fixture_successor(CredentialV2Kind::FinalApprove, &comparison);
     let generation = deliver(
         &mut allocator,

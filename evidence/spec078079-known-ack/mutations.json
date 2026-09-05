@@ -1,0 +1,114 @@
+[
+  {
+    "name": "duplicate-bad",
+    "source": "src/credential_v2/bootstrap.rs",
+    "command": [
+      "cargo",
+      "+1.85.0",
+      "test",
+      "--offline",
+      "--locked",
+      "--all-features",
+      "--test",
+      "credential_v2_manual_session",
+      "restored_duplicate_stored_ack"
+    ],
+    "exitCode": 101,
+    "killed": true,
+    "failureMarker": "Counter",
+    "rawSha256": "c9516d18c11ec0c3abe88d44d748f3bf220a609fa7594af4c9ba657374edb9dc",
+    "replace": {
+      "before": "sequence < last_sent || (sequence == last_sent && !self.awaiting_ack)",
+      "after": "sequence == last_sent && !self.awaiting_ack",
+      "count": 1
+    },
+    "candidateSourceSha256": "d70f38788bd6ad2811cd348ad461e22825a9ff010a562e9b92d7070cee69e636",
+    "mutatedSourceSha256": "fed5593e921538e5c1ec6158545c1bf2b1e5135f917d5afab4b4b4716f653c20",
+    "file": "mutant-duplicate-bad.log",
+    "storedSha256": "c9516d18c11ec0c3abe88d44d748f3bf220a609fa7594af4c9ba657374edb9dc"
+  },
+  {
+    "name": "future-permitted",
+    "source": "src/credential_v2/bootstrap.rs",
+    "command": [
+      "cargo",
+      "+1.85.0",
+      "test",
+      "--offline",
+      "--locked",
+      "--all-features",
+      "--test",
+      "credential_v2_claimant_session",
+      "claimant_unknown_ack_and_expired_duplicate_still_refuse"
+    ],
+    "exitCode": 101,
+    "killed": true,
+    "failureMarker": "assertion failed",
+    "rawSha256": "a962c25da842cb8458ecbd0edce0831858c9bd03b04660fa61be3ddbdfdb3c79",
+    "replace": {
+      "before": "sequence < last_sent || (sequence == last_sent && !self.awaiting_ack)",
+      "after": "sequence < last_sent || (sequence == last_sent && !self.awaiting_ack) || sequence > last_sent",
+      "count": 1
+    },
+    "candidateSourceSha256": "d70f38788bd6ad2811cd348ad461e22825a9ff010a562e9b92d7070cee69e636",
+    "mutatedSourceSha256": "dac0e1f6af86de5a8809cf512c597d2a8bc3b9a37bcfe20d629d4aa1634d7971",
+    "file": "mutant-future-permitted.log",
+    "storedSha256": "a962c25da842cb8458ecbd0edce0831858c9bd03b04660fa61be3ddbdfdb3c79"
+  },
+  {
+    "name": "expiry-skipped",
+    "source": "src/credential_v2/allocator.rs",
+    "command": [
+      "cargo",
+      "+1.85.0",
+      "test",
+      "--offline",
+      "--locked",
+      "--all-features",
+      "--test",
+      "credential_v2_manual_session",
+      "restored_duplicate_stored_ack"
+    ],
+    "exitCode": 101,
+    "killed": true,
+    "failureMarker": "Expired",
+    "rawSha256": "f3f0ace55ab4a84b017c07e13984e76864c4085667067482b2c723747437ef0c",
+    "replace": {
+      "before": "return if now >= expiry {",
+      "after": "return if now > expiry {",
+      "count": 1
+    },
+    "candidateSourceSha256": "2ac13be77097a0d5cfc5428f3f429aa8c89800165fbd9bf62d8805b4763eee35",
+    "mutatedSourceSha256": "d4b2e0d43a58b9e04e261a8d5c5c45763c25f4b93174cf1cdef3229afc5b2fd4",
+    "file": "mutant-expiry-skipped.log",
+    "storedSha256": "f3f0ace55ab4a84b017c07e13984e76864c4085667067482b2c723747437ef0c"
+  },
+  {
+    "name": "durable-extra-checkpoint",
+    "source": "src/credential_v2/claimant.rs",
+    "command": [
+      "cargo",
+      "+1.85.0",
+      "test",
+      "--offline",
+      "--locked",
+      "--all-features",
+      "--test",
+      "credential_v2_claimant_session",
+      "claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint"
+    ],
+    "exitCode": 101,
+    "killed": true,
+    "failureMarker": "duplicate cannot checkpoint",
+    "rawSha256": "deab03ea7cc207eda2e752a1037ed2f4109ed743c51873f9290ff52ce25233d8",
+    "replace": {
+      "before": "if self.relay_ref()?.acknowledgement_already_applied(seq) {",
+      "after": "if false && self.relay_ref()?.acknowledgement_already_applied(seq) {",
+      "count": 1
+    },
+    "candidateSourceSha256": "bd9318bbaacc92b02284dcabc368d8314a99c14a05f7b27ec6dc56e860e58d61",
+    "mutatedSourceSha256": "2383b61d1955a6fe17c59fb13551555238b58125ec1168f784cc1651032df642",
+    "file": "mutant-durable-extra-checkpoint.log",
+    "storedSha256": "deab03ea7cc207eda2e752a1037ed2f4109ed743c51873f9290ff52ce25233d8"
+  }
+]

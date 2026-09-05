@@ -643,6 +643,25 @@ impl CredentialV2AllocatorSession {
         now: u64,
         nonce: CredentialV2CheckpointNonce,
     ) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
+        let (relay, expiry) = match &self.state {
+            AllocatorState::Bootstrap(bootstrap) => (
+                bootstrap.relay_state(),
+                bootstrap.carrier().relay_expires_at(),
+            ),
+            AllocatorState::Established {
+                relay, endpoint, ..
+            } => (relay.as_ref(), endpoint.carrier.relay_expires_at()),
+            _ => return Err(CredentialV2Error::Phase),
+        };
+        if relay.acknowledgement_already_applied(sequence) {
+            // A no-op must preserve the expiry gate otherwise enforced when
+            // this allocator seals its acknowledgement checkpoint.
+            return if now >= expiry {
+                Err(CredentialV2Error::Expired)
+            } else {
+                Ok(Vec::new())
+            };
+        }
         if matches!(self.state, AllocatorState::Established { .. }) {
             return self.application_acknowledged(sequence, now, nonce);
         }

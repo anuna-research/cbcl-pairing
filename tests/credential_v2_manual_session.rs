@@ -147,6 +147,68 @@ fn put(effects: &[Effect]) -> Vec<u8> {
 }
 
 #[test]
+fn restored_duplicate_stored_ack_is_inert_without_weakening_expiry_or_pending_gates() {
+    for mode in [Mode::Full, Mode::Manual] {
+        let (mut original, _, carrier) = allocate(mode);
+        let peer = share(&carrier, input(mode).cpace_secret, 0x31);
+        let effects = receive(&mut original, frame(&peer), 3).unwrap();
+        let (bound, _) = checkpoint(&effects, 2);
+        let exact = sent(&original.checkpoint_persisted(2).unwrap());
+        let mut restored = restore(&bound, &carrier, 2, mode, [0x71; 32]).unwrap();
+        let reopened = sent(&receive(&mut restored, ServerMessage::Welcome, 4).unwrap());
+        assert_eq!(reopened[1], exact[1]);
+        assert_eq!(
+            sent(&receive(&mut restored, frame(&peer), 5).unwrap()),
+            exact
+        );
+        // Open/replay released the same Put twice, so both stored acknowledgements
+        // are real possible relay responses. The second must not advance again.
+        let acknowledged =
+            receive(&mut restored, ServerMessage::Acknowledged { seq: 0 }, 6).unwrap();
+        let (finished, _) = checkpoint(&acknowledged, 3);
+        assert!(
+            matches!(
+                receive(&mut restored, ServerMessage::Acknowledged { seq: 0 }, 7),
+                Err(Error::Phase)
+            ),
+            "the pending persistence gate still precedes duplicate recognition"
+        );
+        restored.checkpoint_persisted(3).unwrap();
+        assert!(
+            receive(&mut restored, ServerMessage::Acknowledged { seq: 0 }, 7)
+                .unwrap()
+                .is_empty()
+        );
+        // The ignored call did not consume nonce 7 or increment the generation.
+        let next = receive(&mut restored, ServerMessage::Acknowledged { seq: 1 }, 7).unwrap();
+        checkpoint(&next, 4);
+        restored.checkpoint_persisted(4).unwrap();
+        for seq in [0, 1] {
+            assert!(
+                receive(&mut restored, ServerMessage::Acknowledged { seq }, 8)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        let mut unknown = restore(&finished, &carrier, 3, mode, [0x72; 32]).unwrap();
+        assert!(matches!(
+            receive(&mut unknown, ServerMessage::Acknowledged { seq: 2 }, 8),
+            Err(Error::Counter)
+        ));
+        let mut expired = restore(&finished, &carrier, 3, mode, [0x73; 32]).unwrap();
+        assert!(matches!(
+            expired.receive(
+                &encode_server_message(&ServerMessage::Acknowledged { seq: 0 }).unwrap(),
+                carrier.relay_expires_at(),
+                Nonce::from_csprng([9; 12]),
+            ),
+            Err(Error::Expired)
+        ));
+        assert!(expired.bootstrap_phase().is_none());
+    }
+}
+
+#[test]
 fn pre_peer_restore_uses_each_explicit_shell_scalar_in_both_modes() {
     for mode in [Mode::Full, Mode::Manual] {
         let (_, sealed, carrier) = allocate(mode);
