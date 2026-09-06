@@ -1,0 +1,33 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-closure-inspection)
+warning: unused variable: `purpose`
+   --> src/credential_v2/checkpoint.rs:165:5
+    |
+165 |     purpose: CheckpointPurpose,
+    |     ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_purpose`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cbcl-pairing` (lib) generated 1 warning (run `cargo fix --lib -p cbcl-pairing` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 1.05s
+     Running tests/credential_v2_manual_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_manual_session-4c3f4c6c3e64c7cb)
+
+running 1 test
+test closure_inspection_authenticates_expired_bootstrap_without_live_authority ... FAILED
+
+failures:
+
+---- closure_inspection_authenticates_expired_bootstrap_without_live_authority stdout ----
+
+thread 'closure_inspection_authenticates_expired_bootstrap_without_live_authority' (8191913) panicked at tests/credential_v2_manual_session.rs:416:17:
+assertion `left == right` failed: inspection cannot alter live expiry
+  left: true
+ right: false
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    closure_inspection_authenticates_expired_bootstrap_without_live_authority
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--test credential_v2_manual_session`

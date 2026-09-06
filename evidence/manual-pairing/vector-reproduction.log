@@ -1,0 +1,3 @@
+independent vector regeneration: exact byte equality
+sha256: 857441abdc181030e9d9432e762002c4a90d432ba9fbd3d07ce4c9e983b5e068
+uses Python stdlib field arithmetic + cryptography X25519; no Rust outputs as inputs

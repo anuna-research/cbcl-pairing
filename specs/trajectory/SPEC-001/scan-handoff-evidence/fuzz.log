@@ -1,0 +1,5 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-scan-handoff-2)
+    Finished `dev` profile [unoptimized] target(s) in 0.47s
+     Running `target/debug/examples/credential_v2_handoff_fuzz 10000`
+seed=0x07700006cafef00d iterations=10000 max_input=4096 cases=70000
+accepted=11160 version=9232 oversize=2696 encoding=2513 schema=13362 carrier=13832 commitment=2280 non_utf8=14925

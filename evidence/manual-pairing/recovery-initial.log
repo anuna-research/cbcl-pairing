@@ -1,0 +1,31 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+    Finished `test` profile [unoptimized] target(s) in 1.87s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/cbcl_pairing-215f7e2f81de7aa0)
+
+running 8 tests
+test cbcl_protocol::tests::depth_preflight_ignores_parentheses_inside_strings ... ok
+test cbcl_protocol::tests::strict_lower_hex_roundtrips ... ok
+test cpace::field::tests::generated_field_wrapper_roundtrips_and_inverts ... ok
+test credential_v2::checkpoint::tests::independent_checkpoint_key_vector_is_exact ... ok
+test cpace::field::tests::official_generator_field_intermediates_match ... ok
+test credential_v2::bootstrap::tests::inner_tag_is_exact_v3_mode_only_and_old_v2_restores_full_only ... FAILED
+test credential_v2::bootstrap::tests::retained_scalar_and_cached_share_are_checked_before_any_recovered_output ... ok
+test credential_v2::channel::independent_tests::test_066_python_oracle_reproduces_complete_v2_schedule_and_first_frame ... ok
+
+failures:
+
+---- credential_v2::bootstrap::tests::inner_tag_is_exact_v3_mode_only_and_old_v2_restores_full_only stdout ----
+
+thread 'credential_v2::bootstrap::tests::inner_tag_is_exact_v3_mode_only_and_old_v2_restores_full_only' (7685418) panicked at src/credential_v2/bootstrap/tests.rs:94:9:
+assertion `left == right` failed
+  left: 9
+ right: 8
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    credential_v2::bootstrap::tests::inner_tag_is_exact_v3_mode_only_and_old_v2_restores_full_only
+
+test result: FAILED. 7 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+error: test failed, to rerun pass `--lib`

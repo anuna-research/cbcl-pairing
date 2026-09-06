@@ -189,6 +189,69 @@ fn sent(effects: &[CredentialV2ClaimantEffect]) -> Vec<ClientMessage> {
 }
 
 #[test]
+fn claimant_unknown_ack_and_expired_duplicate_still_refuse() {
+    for rejected in [1, 2, 15] {
+        let mut claimant = CredentialV2ClaimantSession::new(
+            CredentialV2ClaimantSessionInput {
+                carrier: carrier(),
+                presence_code: CredentialV2PresenceCode::new(CPACE_SECRET, CLAIM_TOKEN),
+                cpace_scalar: [0x69; 32],
+                profile_digest: PROFILE_DIGEST,
+            },
+            Box::new(AcceptBodies),
+        )
+        .unwrap();
+        claimant
+            .receive(&server(ServerMessage::Welcome), NOW)
+            .unwrap();
+        claimant
+            .receive(
+                &server(ServerMessage::ClaimedV2 {
+                    mailbox_id: MAILBOX,
+                    membership_token: MEMBERSHIP,
+                    expires_at: EXPIRY,
+                }),
+                NOW,
+            )
+            .unwrap();
+        assert!(matches!(
+            claimant.receive(&server(ServerMessage::Acknowledged { seq: rejected }), NOW),
+            Err(CredentialV2Error::Counter)
+        ));
+    }
+    let mut claimant = CredentialV2ClaimantSession::new(
+        CredentialV2ClaimantSessionInput {
+            carrier: carrier(),
+            presence_code: CredentialV2PresenceCode::new(CPACE_SECRET, CLAIM_TOKEN),
+            cpace_scalar: [0x69; 32],
+            profile_digest: PROFILE_DIGEST,
+        },
+        Box::new(AcceptBodies),
+    )
+    .unwrap();
+    claimant
+        .receive(&server(ServerMessage::Welcome), NOW)
+        .unwrap();
+    claimant
+        .receive(
+            &server(ServerMessage::ClaimedV2 {
+                mailbox_id: MAILBOX,
+                membership_token: MEMBERSHIP,
+                expires_at: EXPIRY,
+            }),
+            NOW,
+        )
+        .unwrap();
+    claimant
+        .receive(&server(ServerMessage::Acknowledged { seq: 0 }), NOW)
+        .unwrap();
+    assert!(matches!(
+        claimant.receive(&server(ServerMessage::Acknowledged { seq: 0 }), EXPIRY),
+        Err(CredentialV2Error::Expired)
+    ));
+}
+
+#[test]
 fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint() {
     let recognised_carrier = carrier();
     let mut claimant = CredentialV2ClaimantSession::new(
@@ -248,6 +311,10 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
         .receive(&server(ServerMessage::Acknowledged { seq: 0 }), NOW)
         .unwrap()
         .is_empty());
+    assert!(claimant
+        .receive(&server(ServerMessage::Acknowledged { seq: 0 }), NOW)
+        .unwrap()
+        .is_empty());
 
     let finished_effects = claimant
         .receive(
@@ -268,6 +335,13 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
         panic!("claimant Finished must be exact relay sequence one")
     };
     let claimant_finished = decode_frame(claimant_finished).unwrap();
+    assert!(
+        claimant
+            .receive(&server(ServerMessage::Acknowledged { seq: 0 }), NOW)
+            .unwrap()
+            .is_empty(),
+        "an older stored acknowledgement cannot regenerate Finished"
+    );
 
     let allocator_isk = cpace::finish(
         allocator_state,
@@ -360,6 +434,10 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
     claimant
         .receive(&server(ServerMessage::Acknowledged { seq: 2 }), NOW)
         .unwrap();
+    assert!(claimant
+        .receive(&server(ServerMessage::Acknowledged { seq: 2 }), NOW)
+        .unwrap()
+        .is_empty());
 
     let preparation = successor(CredentialV2Kind::Preparation, &approve);
     let preparation_effects = claimant.prepare_application_object(&preparation).unwrap();
@@ -435,6 +513,18 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
     assert_eq!(restored_endpoint.phase(), CredentialV2Phase::FinalApproved);
     assert!(restored_relay.cached_outbound_frame().is_some());
     assert!(claimant.receive(&server(ServerMessage::Pong), NOW).is_err());
+    assert!(
+        matches!(
+            claimant.receive_durable(
+                &server(ServerMessage::Acknowledged { seq: 3 }),
+                NOW,
+                &wrapping_key,
+                CredentialV2CheckpointNonce::from_csprng([0x7a; 12]),
+            ),
+            Err(CredentialV2Error::Phase)
+        ),
+        "duplicate recognition cannot cross an uncommitted checkpoint"
+    );
     assert!(matches!(
         claimant.checkpoint_persisted(2),
         Err(CredentialV2Error::Counter)
@@ -463,6 +553,15 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
     assert!(claimant
         .receive(&server(ServerMessage::Acknowledged { seq: 4 }), NOW)
         .is_err());
+    assert!(matches!(
+        claimant.receive_durable(
+            &server(ServerMessage::Acknowledged { seq: 15 }),
+            NOW,
+            &wrapping_key,
+            CredentialV2CheckpointNonce::from_csprng([0x7a; 12]),
+        ),
+        Err(CredentialV2Error::Counter)
+    ));
     let ack_checkpoint = claimant
         .receive_durable(
             &server(ServerMessage::Acknowledged { seq: 4 }),
@@ -476,6 +575,57 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
         [CredentialV2ClaimantEffect::Checkpoint { generation: 2, .. }]
     ));
     assert!(claimant.checkpoint_persisted(2).unwrap().is_empty());
+    let [CredentialV2ClaimantEffect::Checkpoint {
+        checkpoint: acknowledged_final,
+        ..
+    }] = ack_checkpoint.as_slice()
+    else {
+        unreachable!()
+    };
+    let mut expired_final = CredentialV2ClaimantSession::restore(
+        acknowledged_final.as_bytes(),
+        &wrapping_key,
+        recognised_carrier.clone(),
+        2,
+        NOW,
+        Box::new(AcceptBodies),
+    )
+    .unwrap();
+    for seq in [5, 15] {
+        assert!(matches!(
+            expired_final.receive_durable(
+                &server(ServerMessage::Acknowledged { seq }),
+                NOW,
+                &wrapping_key,
+                CredentialV2CheckpointNonce::from_csprng([0x7b; 12]),
+            ),
+            Err(CredentialV2Error::Phase)
+        ));
+    }
+    assert!(
+        matches!(
+            expired_final.receive_durable(
+                &server(ServerMessage::Acknowledged { seq: 4 }),
+                EXPIRY,
+                &wrapping_key,
+                CredentialV2CheckpointNonce::from_csprng([0x7b; 12]),
+            ),
+            Err(CredentialV2Error::Expired)
+        ),
+        "pre-payload duplicate must retain the exclusive expiry gate"
+    );
+    assert!(
+        claimant
+            .receive_durable(
+                &server(ServerMessage::Acknowledged { seq: 4 }),
+                NOW,
+                &wrapping_key,
+                CredentialV2CheckpointNonce::from_csprng([0x7b; 12]),
+            )
+            .unwrap()
+            .is_empty(),
+        "duplicate cannot checkpoint or consume the next payload nonce"
+    );
 
     let payload = successor(CredentialV2Kind::Payload, &final_approve);
     let payload_checkpoint = claimant
@@ -583,6 +733,18 @@ fn claimant_completes_claim_cpace_and_finished_without_a_preapproval_checkpoint(
         [CredentialV2ClaimantEffect::Checkpoint { generation: 4, .. }]
     ));
     assert!(claimant.checkpoint_persisted(4).unwrap().is_empty());
+    assert!(
+        claimant
+            .receive_durable(
+                &server(ServerMessage::Acknowledged { seq: 5 }),
+                EXPIRY + 1,
+                &wrapping_key,
+                CredentialV2CheckpointNonce::from_csprng([0x7d; 12]),
+            )
+            .unwrap()
+            .is_empty(),
+        "post-payload null expiry retains recovery without a new checkpoint"
+    );
 
     let receipt = receipt(&payload);
     let receipt_frame = allocator_channel.seal(receipt.as_bytes()).unwrap();

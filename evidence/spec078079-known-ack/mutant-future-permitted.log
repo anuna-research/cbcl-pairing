@@ -1,0 +1,23 @@
+   Compiling cbcl-pairing v0.1.0 (/Volumes/anuna-03/codex-successor-ack-mutants)
+    Finished `test` profile [unoptimized] target(s) in 0.83s
+     Running tests/credential_v2_claimant_session.rs (/Volumes/anuna-03/codex-successor-ack-target/debug/deps/credential_v2_claimant_session-822bd0ac1775bf18)
+
+running 1 test
+test claimant_unknown_ack_and_expired_duplicate_still_refuse ... FAILED
+
+failures:
+
+---- claimant_unknown_ack_and_expired_duplicate_still_refuse stdout ----
+
+thread 'claimant_unknown_ack_and_expired_duplicate_still_refuse' panicked at tests/credential_v2_claimant_session.rs:217:9:
+assertion failed: matches!(claimant.receive(&server(ServerMessage::Acknowledged
+    { seq: rejected }), NOW), Err(CredentialV2Error::Counter))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    claimant_unknown_ack_and_expired_duplicate_still_refuse
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--test credential_v2_claimant_session`

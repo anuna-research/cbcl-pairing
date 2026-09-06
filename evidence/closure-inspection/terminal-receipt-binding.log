@@ -1,0 +1,33 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-closure-inspection)
+    Finished `test` profile [unoptimized] target(s) in 1.11s
+     Running tests/credential_v2_allocator_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_allocator_session-ee6e326b69d793f7)
+
+running 2 tests
+test manual_allocator_preserves_both_decisions_comparison_payload_receipt_and_recovery ... FAILED
+test allocator_releases_the_receipt_after_the_payload ... FAILED
+
+failures:
+
+---- manual_allocator_preserves_both_decisions_comparison_payload_receipt_and_recovery stdout ----
+
+thread 'manual_allocator_preserves_both_decisions_comparison_payload_receipt_and_recovery' (8192845) panicked at tests/credential_v2_allocator_session.rs:1032:5:
+assertion `left == right` failed
+  left: Some(([81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
+ right: Some(([81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81], [246, 212, 39, 102, 93, 206, 86, 185, 161, 187, 238, 251, 229, 68, 27, 21, 115, 133, 46, 239, 101, 29, 239, 58, 31, 187, 161, 83, 35, 92, 240, 170]))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- allocator_releases_the_receipt_after_the_payload stdout ----
+
+thread 'allocator_releases_the_receipt_after_the_payload' (8192844) panicked at tests/credential_v2_allocator_session.rs:1032:5:
+assertion `left == right` failed
+  left: Some(([81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
+ right: Some(([81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81, 81], [246, 212, 39, 102, 93, 206, 86, 185, 161, 187, 238, 251, 229, 68, 27, 21, 115, 133, 46, 239, 101, 29, 239, 58, 31, 187, 161, 83, 35, 92, 240, 170]))
+
+
+failures:
+    allocator_releases_the_receipt_after_the_payload
+    manual_allocator_preserves_both_decisions_comparison_payload_receipt_and_recovery
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.54s
+
+error: test failed, to rerun pass `--test credential_v2_allocator_session`

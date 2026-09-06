@@ -124,6 +124,7 @@ name = "cbcl-pairing"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "base64ct",
  "bip39",
  "cbcl-core",
  "cbcl-parser",

@@ -1,0 +1,24 @@
+   Compiling cbcl-pairing v0.1.0 (/Volumes/anuna-03/codex-successor-ack-mutants)
+    Finished `test` profile [unoptimized] target(s) in 0.82s
+     Running tests/credential_v2_manual_session.rs (/Volumes/anuna-03/codex-successor-ack-target/debug/deps/credential_v2_manual_session-9ae5655e9f3b8c69)
+
+running 1 test
+test restored_duplicate_stored_ack_is_inert_without_weakening_expiry_or_pending_gates ... FAILED
+
+failures:
+
+---- restored_duplicate_stored_ack_is_inert_without_weakening_expiry_or_pending_gates stdout ----
+
+thread 'restored_duplicate_stored_ack_is_inert_without_weakening_expiry_or_pending_gates' panicked at tests/credential_v2_manual_session.rs:199:9:
+assertion failed: matches!(expired.receive(&encode_server_message(&ServerMessage::Acknowledged
+    { seq: 0 }).unwrap(), carrier.relay_expires_at(),
+    Nonce::from_csprng([9; 12]),), Err(Error::Expired))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    restored_duplicate_stored_ack_is_inert_without_weakening_expiry_or_pending_gates
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `--test credential_v2_manual_session`

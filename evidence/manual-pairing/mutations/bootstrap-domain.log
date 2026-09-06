@@ -1,0 +1,47 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+    Finished `test` profile [unoptimized] target(s) in 1.18s
+     Running tests/credential_v2_manual.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_manual-27d17ce3847ac128)
+
+running 8 tests
+test independent_bootstrap_vectors_have_no_c_or_verifier_and_exact_bounds ... FAILED
+test formats_never_fall_back_to_another_recognizer ... ok
+test phrase_normalization_is_exactly_ascii_case_and_four_separators ... ok
+test carrier_commitment_key_and_exclusive_expiry_precede_typed_input ... FAILED
+test bootstrap_fixed_schema_rejects_nesting_extras_nonminimal_lengths_and_truncation ... FAILED
+test bootstrap_lexical_bounds_and_canonical_encoding_are_closed ... ok
+test independent_word_vectors_pin_list_hash_indices_checksum_mapping_and_mask ... ok
+test independent_real_cpace_and_finished_vector_uses_unchanged_context ... ok
+
+failures:
+
+---- independent_bootstrap_vectors_have_no_c_or_verifier_and_exact_bounds stdout ----
+
+thread 'independent_bootstrap_vectors_have_no_c_or_verifier_and_exact_bounds' (7775840) panicked at tests/credential_v2_manual.rs:125:9:
+assertion `left == right` failed
+  left: "SSPAIR-M1:g3gac2VsZnNhbWUtcGFpcmluZy1tYW51YWwvdjJZAX-rZ2xvY2F0b3JYIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fZ3Byb2ZpbGV2YW51bmEuaW8vY3JlZGVudGlhbC92Mmd2ZXJzaW9uAmxyZWxheS1vcmlnaW5paHR0cHM6Ly9ybWNhcnJpZXItbm9uY2VYIEVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFb3Byb2ZpbGUtdmVyc2lvbgJwY2xhaW0tY29tbWl0bWVudFgg0JDJGeZ3QTPxE6tB33GIv6yhKFRU1WEPqU83cn1V5IVwcmVsYXktZXhwaXJlcy1hdAFzYXBwbGljYXRpb24tY29udGV4dGtodHRwczovL2EveHNjYXJyaWVyLWNlcmVtb255LWlkWCAjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI3ZleHBlY3RlZC1hbGxvY2F0b3Ita2V5WCBnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ1Dw8fLz9PX29_j5-vv8_f7_"
+ right: "SSPAIR-M1:g3gac2VsZnNhbWUtcGFpcmluZy1tYW51YWwvdjFZAX-rZ2xvY2F0b3JYIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fZ3Byb2ZpbGV2YW51bmEuaW8vY3JlZGVudGlhbC92Mmd2ZXJzaW9uAmxyZWxheS1vcmlnaW5paHR0cHM6Ly9ybWNhcnJpZXItbm9uY2VYIEVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFb3Byb2ZpbGUtdmVyc2lvbgJwY2xhaW0tY29tbWl0bWVudFgg0JDJGeZ3QTPxE6tB33GIv6yhKFRU1WEPqU83cn1V5IVwcmVsYXktZXhwaXJlcy1hdAFzYXBwbGljYXRpb24tY29udGV4dGtodHRwczovL2EveHNjYXJyaWVyLWNlcmVtb255LWlkWCAjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI3ZleHBlY3RlZC1hbGxvY2F0b3Ita2V5WCBnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ1Dw8fLz9PX29_j5-vv8_f7_"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- carrier_commitment_key_and_exclusive_expiry_precede_typed_input stdout ----
+
+thread 'carrier_commitment_key_and_exclusive_expiry_precede_typed_input' (7775838) panicked at tests/credential_v2_manual.rs:58:5:
+assertion `left == right` failed
+  left: Version
+ right: Commitment
+
+---- bootstrap_fixed_schema_rejects_nesting_extras_nonminimal_lengths_and_truncation stdout ----
+
+thread 'bootstrap_fixed_schema_rejects_nesting_extras_nonminimal_lengths_and_truncation' (7775836) panicked at tests/credential_v2_manual.rs:58:5:
+assertion `left == right` failed
+  left: Version
+ right: Schema
+
+
+failures:
+    bootstrap_fixed_schema_rejects_nesting_extras_nonminimal_lengths_and_truncation
+    carrier_commitment_key_and_exclusive_expiry_precede_typed_input
+    independent_bootstrap_vectors_have_no_c_or_verifier_and_exact_bounds
+
+test result: FAILED. 5 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--test credential_v2_manual`

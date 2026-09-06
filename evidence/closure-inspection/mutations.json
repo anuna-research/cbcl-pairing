@@ -1,0 +1,97 @@
+[
+  {
+    "name": "inspection-uses-live-expiry",
+    "source": "src/credential_v2/checkpoint.rs",
+    "before": "expected_generation, CheckpointPurpose::Inspect)",
+    "after": "expected_generation, CheckpointPurpose::ResumeAt(u64::MAX))",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session",
+      "closure_inspection"
+    ],
+    "exitCode": 101,
+    "behavioralRed": true
+  },
+  {
+    "name": "ordinary-expiry-bypassed",
+    "source": "src/credential_v2/checkpoint.rs",
+    "before": "if let CheckpointPurpose::ResumeAt(now) = purpose {",
+    "after": "if let CheckpointPurpose::ResumeAt(now) = CheckpointPurpose::Inspect {",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session",
+      "closure_inspection"
+    ],
+    "exitCode": 101,
+    "behavioralRed": true
+  },
+  {
+    "name": "profile-binding",
+    "source": "src/credential_v2/inspection.rs",
+    "before": "if bootstrap.profile_digest() != &expected_profile_digest {",
+    "after": "if false && bootstrap.profile_digest() != &expected_profile_digest {",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session",
+      "closure_inspection"
+    ],
+    "exitCode": 101,
+    "behavioralRed": true
+  },
+  {
+    "name": "carrier-binding",
+    "source": "src/credential_v2/bootstrap.rs",
+    "before": "if &carrier != expected_carrier {",
+    "after": "if false && &carrier != expected_carrier {",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_manual_session",
+      "closure_inspection"
+    ],
+    "exitCode": 101,
+    "behavioralRed": true
+  },
+  {
+    "name": "expiry-shape",
+    "source": "src/credential_v2/bootstrap.rs",
+    "before": "if opened.expiry != Some(carrier.relay_expires_at()) {",
+    "after": "if false && opened.expiry != Some(carrier.relay_expires_at()) {",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--lib",
+      "closure_inspection_rejects_authenticated_outer_expiry_shape_substitution"
+    ],
+    "exitCode": 101,
+    "behavioralRed": true
+  },
+  {
+    "name": "terminal-receipt-binding",
+    "source": "src/credential_v2/inspection.rs",
+    "before": ".map(|last| (last.intent_digest, last.content_hash))",
+    "after": ".map(|last| (last.intent_digest, [0; 32]))",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--test",
+      "credential_v2_allocator_session",
+      "receipt"
+    ],
+    "exitCode": 101,
+    "behavioralRed": true
+  }
+]

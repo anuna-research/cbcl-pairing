@@ -1,0 +1,33 @@
+   Compiling cbcl-pairing v0.1.0 (/Users/anuna-01/Code/cbcl-pairing-pairing-manual-1)
+warning: unused variable: `fresh_cpace_scalar`
+   --> src/credential_v2/allocator.rs:203:13
+    |
+203 |         let fresh_cpace_scalar = Zeroizing::new(fresh_cpace_scalar);
+    |             ^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fresh_cpace_scalar`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `cbcl-pairing` (lib) generated 1 warning (run `cargo fix --lib -p cbcl-pairing` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 1.25s
+     Running tests/credential_v2_manual_session.rs (/Volumes/anuna-03/codex-spec078-pairing-target/debug/deps/credential_v2_manual_session-4c3f4c6c3e64c7cb)
+
+running 1 test
+test pre_peer_restore_uses_each_explicit_shell_scalar_in_both_modes ... FAILED
+
+failures:
+
+---- pre_peer_restore_uses_each_explicit_shell_scalar_in_both_modes stdout ----
+
+thread 'pre_peer_restore_uses_each_explicit_shell_scalar_in_both_modes' (7779749) panicked at tests/credential_v2_manual_session.rs:176:13:
+assertion `left == right` failed
+  left: Cpace(CpaceMessage { side: Allocator, share: [207, 144, 25, 114, 62, 180, 86, 124, 187, 254, 4, 37, 146, 222, 222, 20, 69, 101, 128, 23, 139, 185, 1, 245, 149, 134, 191, 183, 196, 64, 51, 85], associated_data: [133, 120, 29, 99, 98, 99, 108, 45, 112, 97, 105, 114, 105, 110, 103, 45, 97, 100, 47, 99, 114, 101, 100, 101, 110, 116, 105, 97, 108, 45, 118, 50, 105, 97, 108, 108, 111, 99, 97, 116, 111, 114, 88, 32, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 88, 32, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 88, 32, 193, 225, 45, 250, 38, 12, 17, 171, 248, 177, 40, 220, 30, 102, 214, 108, 189, 12, 86, 33, 127, 80, 123, 84, 5, 13, 60, 190, 65, 27, 187, 136] })
+ right: Cpace(CpaceMessage { side: Allocator, share: [19, 130, 184, 50, 77, 79, 21, 68, 34, 231, 123, 159, 85, 175, 66, 249, 95, 32, 156, 124, 251, 39, 36, 152, 240, 164, 33, 112, 192, 251, 51, 63], associated_data: [133, 120, 29, 99, 98, 99, 108, 45, 112, 97, 105, 114, 105, 110, 103, 45, 97, 100, 47, 99, 114, 101, 100, 101, 110, 116, 105, 97, 108, 45, 118, 50, 105, 97, 108, 108, 111, 99, 97, 116, 111, 114, 88, 32, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 88, 32, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 88, 32, 193, 225, 45, 250, 38, 12, 17, 171, 248, 177, 40, 220, 30, 102, 214, 108, 189, 12, 86, 33, 127, 80, 123, 84, 5, 13, 60, 190, 65, 27, 187, 136] })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    pre_peer_restore_uses_each_explicit_shell_scalar_in_both_modes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--test credential_v2_manual_session`

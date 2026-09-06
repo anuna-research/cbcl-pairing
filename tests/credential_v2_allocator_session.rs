@@ -32,6 +32,7 @@ impl CredentialV2BodyVerifier for AcceptBodies {
 
 fn input() -> CredentialV2AllocatorSessionInput {
     CredentialV2AllocatorSessionInput {
+        mode: cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
         application_context: "https://chat.anuna.io/selfsame/v2".into(),
         relay_origin: "https://chat.anuna.io:9443".into(),
         mailbox_id: MAILBOX,
@@ -65,7 +66,73 @@ fn one_checkpoint(effects: Vec<CredentialV2AllocatorEffect>, generation: u64) ->
         !carrier.is_empty(),
         "recovery persists the recognised carrier"
     );
+    assert_read_only_inspection(checkpoint.as_bytes(), carrier, generation);
     carrier.clone()
+}
+
+// Exercise the real sealed checkpoints at every application/CPace transition
+// used by both Full and Manual fixtures; expected mode is never inferred from C.
+fn assert_read_only_inspection(checkpoint: &[u8], carrier: &[u8], generation: u64) {
+    use cbcl_pairing::credential_v2::{
+        CredentialV2AllocatorCheckpointInspection as Inspection, CredentialV2AllocatorMode as Mode,
+    };
+    let carrier = decode_carrier(carrier).unwrap();
+    for now in [NOW, EXPIRY, EXPIRY + 1] {
+        let mut accepted = 0;
+        for mode in [Mode::Full, Mode::Manual] {
+            let Ok(view) = Inspection::inspect(
+                checkpoint,
+                &WRAPPING_KEY,
+                &carrier,
+                generation,
+                PROFILE_DIGEST,
+                now,
+                mode,
+                Box::new(AcceptBodies),
+            ) else {
+                continue;
+            };
+            accepted += 1;
+            assert_eq!(view.is_expired(), now >= EXPIRY);
+            if let Some(authenticated_mode) = view.bootstrap_mode() {
+                assert_eq!(authenticated_mode, mode);
+                assert!(view.bootstrap_phase().is_some());
+                assert!(view.endpoint_phase().is_none());
+                assert!(view.last_received_object().is_none());
+            } else {
+                assert!(view.bootstrap_phase().is_none());
+                assert!(view.endpoint_phase().is_some());
+                assert!(view.transcript_hash().is_some());
+                assert!(view.receipt_recovery_commitment().is_some());
+                if view.endpoint_phase()
+                    == Some(cbcl_pairing::credential_v2::CredentialV2Phase::Terminal)
+                {
+                    assert!(view.terminal_receipt_binding().is_some());
+                    assert!(view.last_received_object().is_none());
+                } else {
+                    assert!(view.terminal_receipt_binding().is_none());
+                }
+            }
+            if now >= EXPIRY {
+                assert!(CredentialV2AllocatorSession::restore(
+                    checkpoint,
+                    &WRAPPING_KEY,
+                    carrier.clone(),
+                    generation,
+                    PROFILE_DIGEST,
+                    now,
+                    mode,
+                    [0x61; 32],
+                    Box::new(AcceptBodies)
+                )
+                .is_err());
+            }
+        }
+        assert!(
+            accepted > 0,
+            "a real sealed checkpoint must remain inspectable after expiry"
+        );
+    }
 }
 
 fn sent(effects: &[CredentialV2AllocatorEffect]) -> Vec<ClientMessage> {
@@ -93,6 +160,8 @@ fn assert_restored_reopens_cached_bootstrap_frame(
         generation,
         PROFILE_DIGEST,
         NOW,
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
+        [0x39; 32],
         Box::new(AcceptBodies),
     )
     .unwrap();
@@ -136,6 +205,8 @@ fn assert_restored_reopens_acknowledged_bootstrap_frame(
         generation,
         PROFILE_DIGEST,
         NOW,
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
+        [0x39; 32],
         Box::new(AcceptBodies),
     )
     .unwrap();
@@ -391,6 +462,8 @@ fn allocator_requests_900_and_checkpoints_before_carrier_and_each_cached_frame()
         6,
         PROFILE_DIGEST,
         NOW,
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
+        [0x39; 32],
         Box::new(AcceptBodies),
     )
     .unwrap();
@@ -571,6 +644,8 @@ fn allocator_restores_the_bound_membership_and_only_the_cached_frame() {
         1,
         PROFILE_DIGEST,
         NOW,
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
+        [0x39; 32],
         Box::new(AcceptBodies),
     )
     .unwrap();
@@ -604,6 +679,8 @@ fn allocator_restores_the_bound_membership_and_only_the_cached_frame() {
         1,
         [0xff; 32],
         NOW,
+        cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
+        [0x39; 32],
         Box::new(AcceptBodies),
     )
     .is_err());
@@ -674,12 +751,24 @@ fn fixture_receipt(predecessor: &CredentialV2Object) -> CredentialV2Object {
 /// (CPace + both Finished values), the same way the durability test does but
 /// without its restoration assertions. Returns the allocator, the claimant's
 /// secure channel, and the next checkpoint generation.
-fn established_allocator() -> (
+fn established_allocator(
+    mode: cbcl_pairing::credential_v2::CredentialV2AllocatorMode,
+) -> (
     CredentialV2AllocatorSession,
     cbcl_pairing::credential_v2::SecureCredentialV2Channel,
     u64,
 ) {
-    let mut allocator = CredentialV2AllocatorSession::new(input(), Box::new(AcceptBodies)).unwrap();
+    let mut attempt = input();
+    attempt.mode = mode;
+    if mode == cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Manual {
+        attempt.cpace_secret =
+            *cbcl_pairing::credential_v2::CredentialV2ManualWords::from_csprng([
+                0x12, 0x34, 0x56, 0x78,
+            ])
+            .cpace_secret();
+    }
+    let cpace_secret = attempt.cpace_secret;
+    let mut allocator = CredentialV2AllocatorSession::new(attempt, Box::new(AcceptBodies)).unwrap();
     allocator.start().unwrap();
     allocator
         .receive(
@@ -706,7 +795,7 @@ fn established_allocator() -> (
     allocator.checkpoint_persisted(1).unwrap();
 
     let context = CredentialV2Context::derive(&carrier, PROFILE_DIGEST).unwrap();
-    let claimant_presence = CredentialV2Presence::new(CPACE_SECRET, CLAIM_TOKEN);
+    let claimant_presence = CredentialV2Presence::new(cpace_secret, CLAIM_TOKEN);
     let (claimant_state, claimant_share) = context
         .start_cpace(Side::Claimant, &claimant_presence, [0x63; 32])
         .unwrap();
@@ -802,6 +891,10 @@ fn established_allocator() -> (
             CredentialV2AllocatorEffect::Established { .. }
         ]
     ));
+    assert!(allocator.bootstrap_mode().is_none());
+    assert!(allocator.presence_code().is_none());
+    assert!(allocator.handoff_text().unwrap().is_none());
+    assert!(allocator.manual_transfer_text().unwrap().is_none());
     (allocator, claimant_channel, 6)
 }
 
@@ -880,10 +973,32 @@ fn deliver(
 
 #[test]
 fn allocator_releases_the_receipt_after_the_payload() {
-    let (mut allocator, mut claimant_channel, generation) = established_allocator();
+    assert_receipt_flow(cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full);
+}
+
+#[test]
+fn manual_allocator_preserves_both_decisions_comparison_payload_receipt_and_recovery() {
+    assert_receipt_flow(cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Manual);
+}
+
+fn assert_receipt_flow(mode: cbcl_pairing::credential_v2::CredentialV2AllocatorMode) {
+    let (mut allocator, mut claimant_channel, generation) = established_allocator(mode);
 
     let offer = CredentialV2Object::new(CredentialV2Kind::Offer, [0x51; 32], vec![0xa0]).unwrap();
     let generation = release(&mut allocator, &offer, 2, generation, 0x70);
+    for seq in [0, 1, 2] {
+        assert!(
+            allocator
+                .receive(
+                    &server(ServerMessage::Acknowledged { seq }),
+                    NOW,
+                    CredentialV2CheckpointNonce::from_csprng([0x72; 12]),
+                )
+                .unwrap()
+                .is_empty(),
+            "known stored Ack cannot repeat an application checkpoint"
+        );
+    }
     let intent_approve = fixture_successor(CredentialV2Kind::IntentApprove, &offer);
     let generation = deliver(
         &mut allocator,
@@ -904,6 +1019,14 @@ fn allocator_releases_the_receipt_after_the_payload() {
     );
     let comparison = fixture_successor(CredentialV2Kind::ComparisonConfirmed, &preparation);
     let generation = release(&mut allocator, &comparison, 3, generation, 0x74);
+    assert!(allocator
+        .receive(
+            &server(ServerMessage::Acknowledged { seq: 3 }),
+            NOW,
+            CredentialV2CheckpointNonce::from_csprng([0x76; 12]),
+        )
+        .unwrap()
+        .is_empty());
     let final_approve = fixture_successor(CredentialV2Kind::FinalApprove, &comparison);
     let generation = deliver(
         &mut allocator,
@@ -947,6 +1070,23 @@ fn allocator_releases_the_receipt_after_the_payload() {
         panic!("the Receipt must be withheld behind its checkpoint: {effects:?}")
     };
     assert_eq!(*receipt_generation, generation);
+    assert_read_only_inspection(receipt_checkpoint.as_bytes(), receipt_carrier, generation);
+    let inspection =
+        cbcl_pairing::credential_v2::CredentialV2AllocatorCheckpointInspection::inspect(
+            receipt_checkpoint.as_bytes(),
+            &WRAPPING_KEY,
+            &decode_carrier(receipt_carrier).unwrap(),
+            generation,
+            PROFILE_DIGEST,
+            EXPIRY,
+            mode,
+            Box::new(AcceptBodies),
+        )
+        .unwrap();
+    assert_eq!(
+        inspection.terminal_receipt_binding(),
+        Some((*receipt.intent_digest(), receipt.content_hash()))
+    );
     let commands = sent(&allocator.checkpoint_persisted(generation).unwrap());
     let [ClientMessage::Put {
         seq: 4,
@@ -988,6 +1128,7 @@ fn allocator_releases_the_receipt_after_the_payload() {
     else {
         panic!("the Receipt acknowledgement must still be checkpointed: {acknowledged:?}")
     };
+    assert_read_only_inspection(final_checkpoint.as_bytes(), final_carrier, generation + 1);
     assert!(allocator
         .checkpoint_persisted(generation + 1)
         .unwrap()

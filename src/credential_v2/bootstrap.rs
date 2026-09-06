@@ -9,7 +9,19 @@ use crate::{cpace, wire::Side};
 use std::fmt;
 use zeroize::Zeroizing;
 
-const INNER_DOMAIN: &[u8] = b"cbcl-pairing allocator bootstrap/v2\0";
+const OLD_INNER_DOMAIN: &[u8] = b"cbcl-pairing allocator bootstrap/v2\0";
+const INNER_DOMAIN: &[u8] = b"cbcl-pairing allocator bootstrap/v3";
+
+/// Explicit local bootstrap authority, authenticated inside the sealed checkpoint.
+/// C bytes never select this mode. Established checkpoints do not carry it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CredentialV2AllocatorMode {
+    /// Independent uniform 128-bit C and T, with full and legacy transfer.
+    Full,
+    /// SPEC-078 three-word C mapping and independent T, with manual transfer only.
+    Manual,
+}
+
 const MAX_INNER_BYTES: usize = 69_616;
 const MAX_FRAME_BYTES: usize = 69_600;
 
@@ -103,6 +115,15 @@ impl CredentialV2RelayState {
         self.awaiting_ack
     }
 
+    /// Exact Put retries receive another relay acknowledgement. Only sequences
+    /// already acknowledged by this retained, contiguous projection are inert.
+    pub(super) fn acknowledgement_already_applied(&self, sequence: u8) -> bool {
+        let Some(last_sent) = self.next_local_sequence.checked_sub(1) else {
+            return false;
+        };
+        sequence < last_sent || (sequence == last_sent && !self.awaiting_ack)
+    }
+
     pub(super) fn cache_application_frame(
         &mut self,
         frame: CredentialV2Frame,
@@ -170,6 +191,7 @@ impl fmt::Debug for CredentialV2RelayState {
 /// Crash-recoverable allocator state from carrier allocation through Finished.
 pub struct CredentialV2AllocatorBootstrap {
     carrier: CredentialV2Carrier,
+    mode: CredentialV2AllocatorMode,
     presence: CredentialV2Presence,
     profile_digest: [u8; 32],
     relay: CredentialV2RelayState,
@@ -200,10 +222,19 @@ impl CredentialV2AllocatorBootstrap {
         presence: CredentialV2Presence,
         profile_digest: [u8; 32],
         relay: CredentialV2RelayState,
+        mode: CredentialV2AllocatorMode,
     ) -> Result<Self, CredentialV2Error> {
         CredentialV2Context::derive(&carrier, profile_digest)?;
+        if mode == CredentialV2AllocatorMode::Manual {
+            super::CredentialV2ManualWords::from_secret(*presence.cpace_secret())
+                .map_err(|_| CredentialV2Error::Schema)?;
+            if carrier.expected_allocator_key().is_none() {
+                return Err(CredentialV2Error::Profile);
+            }
+        }
         Ok(Self {
             carrier,
+            mode,
             presence,
             profile_digest,
             relay,
@@ -216,6 +247,12 @@ impl CredentialV2AllocatorBootstrap {
             checkpoint_generation: 0,
             checkpoint_nonce: None,
         })
+    }
+
+    /// Return the explicitly selected, checkpoint-authenticated bootstrap mode.
+    #[must_use]
+    pub const fn mode(&self) -> CredentialV2AllocatorMode {
+        self.mode
     }
 
     /// Return the current exact bootstrap phase.
@@ -247,7 +284,50 @@ impl CredentialV2AllocatorBootstrap {
     }
 
     pub(super) fn presence_code(&self) -> Option<String> {
-        self.presence.display_code()
+        (self.mode == CredentialV2AllocatorMode::Full)
+            .then(|| self.presence.display_code())
+            .flatten()
+    }
+
+    pub(super) fn handoff(&self) -> Result<Option<super::CredentialV2Handoff>, CredentialV2Error> {
+        if self.mode != CredentialV2AllocatorMode::Full {
+            return Err(CredentialV2Error::Phase);
+        }
+        let (c, t) = self.presence.checkpoint_parts();
+        t.map(|t| {
+            super::CredentialV2Handoff::new(
+                self.carrier.clone(),
+                super::CredentialV2PresenceCode::new(*c, *t.as_bytes()),
+            )
+            .map_err(|_| CredentialV2Error::Profile)
+        })
+        .transpose()
+    }
+
+    #[allow(clippy::type_complexity)] // Two zeroizing transfer strings; no additional container.
+    pub(super) fn manual_transfer_text(
+        &self,
+    ) -> Result<Option<(Zeroizing<String>, Zeroizing<String>)>, CredentialV2Error> {
+        if self.mode != CredentialV2AllocatorMode::Manual {
+            return Err(CredentialV2Error::Phase);
+        }
+        let (c, t) = self.presence.checkpoint_parts();
+        t.map(|t| {
+            let bootstrap =
+                super::CredentialV2ManualBootstrap::new(self.carrier.clone(), *t.as_bytes(), 0)
+                    .map_err(|_| CredentialV2Error::Profile)?;
+            let words = super::CredentialV2ManualWords::from_secret(*c)
+                .map_err(|_| CredentialV2Error::Schema)?;
+            Ok((
+                bootstrap.encode().map_err(|_| CredentialV2Error::Schema)?,
+                words.encode(),
+            ))
+        })
+        .transpose()
+    }
+
+    pub(super) fn peer_cpace(&self) -> Option<&CredentialV2Frame> {
+        self.peer_cpace.as_ref()
     }
 
     /// Borrow the exact frame that recovery must retransmit before any advance.
@@ -429,6 +509,7 @@ impl CredentialV2AllocatorBootstrap {
         expected_carrier: &CredentialV2Carrier,
         expected_generation: u64,
         now: u64,
+        expected_mode: CredentialV2AllocatorMode,
     ) -> Result<Self, CredentialV2Error> {
         let opened = open_checkpoint_plaintext(
             input,
@@ -446,6 +527,34 @@ impl CredentialV2AllocatorBootstrap {
             expected_carrier,
             expected_generation,
             opened.nonce,
+            expected_mode,
+        )
+    }
+
+    // The value is consumed within the inspection module and never returned to
+    // a caller. Its C/T/scalar/channel temporaries erase on drop after projection.
+    pub(super) fn inspect_checkpoint(
+        input: &[u8],
+        wrapping_key: &[u8; 32],
+        carrier: &CredentialV2Carrier,
+        generation: u64,
+        expected_mode: CredentialV2AllocatorMode,
+    ) -> Result<Self, CredentialV2Error> {
+        let opened = super::checkpoint::inspect_checkpoint_plaintext(
+            input,
+            wrapping_key,
+            carrier,
+            generation,
+        )?;
+        if opened.expiry != Some(carrier.relay_expires_at()) {
+            return Err(CredentialV2Error::Schema);
+        }
+        Self::decode_inner(
+            &opened.plaintext,
+            carrier,
+            generation,
+            opened.nonce,
+            expected_mode,
         )
     }
 
@@ -461,6 +570,10 @@ impl CredentialV2AllocatorBootstrap {
         let (cpace_secret, claim_token) = self.presence.checkpoint_parts();
         let mut output = Zeroizing::new(Vec::with_capacity(1024));
         output.extend_from_slice(INNER_DOMAIN);
+        output.push(match self.mode {
+            CredentialV2AllocatorMode::Full => 0,
+            CredentialV2AllocatorMode::Manual => 1,
+        });
         append_bytes(&mut output, &carrier)?;
         output.extend_from_slice(&self.profile_digest);
         output.push(phase_number(self.phase));
@@ -493,10 +606,23 @@ impl CredentialV2AllocatorBootstrap {
         expected_carrier: &CredentialV2Carrier,
         expected_generation: u64,
         expected_nonce: [u8; 12],
+        expected_mode: CredentialV2AllocatorMode,
     ) -> Result<Self, CredentialV2Error> {
         let mut cursor = Cursor::new(input);
-        if cursor.take(INNER_DOMAIN.len())? != INNER_DOMAIN {
+        let tag = cursor.take(OLD_INNER_DOMAIN.len())?;
+        let mode = if tag == OLD_INNER_DOMAIN {
+            CredentialV2AllocatorMode::Full
+        } else if &tag[..INNER_DOMAIN.len()] == INNER_DOMAIN {
+            match tag[INNER_DOMAIN.len()] {
+                0 => CredentialV2AllocatorMode::Full,
+                1 => CredentialV2AllocatorMode::Manual,
+                _ => return Err(CredentialV2Error::Schema),
+            }
+        } else {
             return Err(CredentialV2Error::Schema);
+        };
+        if mode != expected_mode {
+            return Err(CredentialV2Error::Profile);
         }
         let carrier = decode_carrier(cursor.length_prefixed(MAX_INNER_BYTES)?)?;
         if &carrier != expected_carrier {
@@ -525,6 +651,7 @@ impl CredentialV2AllocatorBootstrap {
         }
         let mut bootstrap = Self {
             carrier,
+            mode,
             presence,
             profile_digest,
             relay,
@@ -542,6 +669,19 @@ impl CredentialV2AllocatorBootstrap {
         }
         if phase == CredentialV2AllocatorBootstrapPhase::FinishedSent {
             bootstrap.rebuild_pending()?;
+        } else if phase == CredentialV2AllocatorBootstrapPhase::ShareSent {
+            // Validate the retained scalar against the cached reply before any replay.
+            let scalar = bootstrap
+                .fresh_scalar
+                .as_ref()
+                .ok_or(CredentialV2Error::Schema)?;
+            let context =
+                CredentialV2Context::derive(&bootstrap.carrier, bootstrap.profile_digest)?;
+            let (_, message) =
+                context.start_cpace(Side::Allocator, &bootstrap.presence, **scalar)?;
+            if bootstrap.cached_outbound.as_ref() != Some(&CredentialV2Frame::cpace(&message)?) {
+                return Err(CredentialV2Error::Profile);
+            }
         }
         Ok(bootstrap)
     }
@@ -573,7 +713,13 @@ impl CredentialV2AllocatorBootstrap {
     }
 
     fn projection_is_consistent(&self) -> bool {
-        let (_, claim) = self.presence.checkpoint_parts();
+        let (c, claim) = self.presence.checkpoint_parts();
+        if self.mode == CredentialV2AllocatorMode::Manual
+            && (super::CredentialV2ManualWords::from_secret(*c).is_err()
+                || self.carrier.expected_allocator_key().is_none())
+        {
+            return false;
+        }
         match self.phase {
             CredentialV2AllocatorBootstrapPhase::Allocated => {
                 claim.is_some()
@@ -761,3 +907,6 @@ const fn number_phase(value: u8) -> Result<CredentialV2AllocatorBootstrapPhase, 
         _ => Err(CredentialV2Error::Schema),
     }
 }
+
+#[cfg(test)]
+mod tests;

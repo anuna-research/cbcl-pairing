@@ -16,6 +16,7 @@ std = []
 relay = ["std", "dep:getrandom", "dep:tungstenite"]
 
 [dependencies]
+base64ct = { version = "=1.8.3", features = ["alloc"] }
 aes-gcm = { version = "=0.11.0", default-features = false, features = ["aes", "alloc", "zeroize"] }
 bip39 = { version = "=2.2.2", default-features = false, features = ["std"] }
 cbcl-core = { version = "=0.1.0", git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
@@ -33,7 +34,7 @@ subtle = "=2.6.1"
 tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"], optional = true }
 url = "=2.5.8"
 x25519-dalek = { version = "=2.0.1", default-features = false, features = ["zeroize"] }
-zeroize = "=1.9.0"
+zeroize = { version = "=1.9.0", features = ["derive"] }
 
 [dev-dependencies]
 hex = "=0.4.3"

@@ -1,0 +1,45 @@
+{
+  "schema": "spec078079-known-ack/v1",
+  "baseCommit": "ed2a35f50ae0c0567ff7707dcf1901e8fc0248e5",
+  "sourceSha256": {
+    "src/credential_v2/allocator.rs": "2ac13be77097a0d5cfc5428f3f429aa8c89800165fbd9bf62d8805b4763eee35",
+    "src/credential_v2/bootstrap.rs": "d70f38788bd6ad2811cd348ad461e22825a9ff010a562e9b92d7070cee69e636",
+    "src/credential_v2/claimant.rs": "bd9318bbaacc92b02284dcabc368d8314a99c14a05f7b27ec6dc56e860e58d61",
+    "tests/credential_v2_allocator_session.rs": "6c37ae75598e85018e2f44c5a52c3024d7fa4ebf735c8b757accfa0cdd8d383d",
+    "tests/credential_v2_claimant_session.rs": "1eb92670053d59c3367a3e9368ac0ef20e1a5b331721b1e852334f4361275306",
+    "tests/credential_v2_manual_session.rs": "dc9b631380edb1b580929b345b3e8c7373aa5bd0cf95401a01d129f8f61766dd"
+  },
+  "logs": [
+    {
+      "file": "original-red.log",
+      "exitCode": 101,
+      "rawSha256": "f161488607db24891768df60b8793130b4e33f6a74fdd15d517c23d00f1d567b",
+      "storedSha256": "f161488607db24891768df60b8793130b4e33f6a74fdd15d517c23d00f1d567b"
+    },
+    {
+      "file": "all-features-green.log",
+      "exitCode": 0,
+      "rawSha256": "eb591c49fb8107b29e84a0e17382dd1bfbccec0a575b4d0c81f7a3aca614097d",
+      "storedSha256": "61cfc11f82b8858032ca209d3e1486a5bae1f6f6bc9af223d567c2557a1e5b62"
+    },
+    {
+      "file": "clippy.log",
+      "exitCode": 0,
+      "rawSha256": "7ece10cbcf3fda4a959e4137dbfc5ddbe0bed08e1004ea99faf35e2064cff5c3",
+      "storedSha256": "7ece10cbcf3fda4a959e4137dbfc5ddbe0bed08e1004ea99faf35e2064cff5c3"
+    }
+  ],
+  "counts": {
+    "targets": 33,
+    "passed": 182,
+    "failed": 0,
+    "ignored": 0
+  },
+  "mutantsKilled": 4,
+  "commands": [
+    "CARGO_TARGET_DIR=/Volumes/anuna-03/codex-successor-ack-target CARGO_PROFILE_TEST_DEBUG=0 CARGO_BUILD_JOBS=4 cargo +1.85.0 test --offline --locked --all-features",
+    "CARGO_TARGET_DIR=/Volumes/anuna-03/codex-successor-ack-target CARGO_PROFILE_TEST_DEBUG=0 CARGO_BUILD_JOBS=4 cargo +1.85.0 clippy --offline --locked --all-features --all-targets -- -D warnings",
+    "cargo +1.85.0 fmt --all --check"
+  ],
+  "actualCrashSourceClosureAcceptance": false
+}

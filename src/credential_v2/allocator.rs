@@ -1,19 +1,21 @@
 use super::{
     decode_frame, decode_object, encode_carrier, CredentialV2AllocatorBootstrap,
-    CredentialV2AllocatorBootstrapPhase, CredentialV2BodyVerifier, CredentialV2Carrier,
-    CredentialV2CarrierInput, CredentialV2CheckpointNonce, CredentialV2Endpoint, CredentialV2Error,
-    CredentialV2Object, CredentialV2Presence, CredentialV2RelayState, EndpointCheckpointV2,
-    SecureCredentialV2Channel,
+    CredentialV2AllocatorBootstrapPhase, CredentialV2AllocatorMode, CredentialV2BodyVerifier,
+    CredentialV2Carrier, CredentialV2CarrierInput, CredentialV2CheckpointNonce,
+    CredentialV2Endpoint, CredentialV2Error, CredentialV2Object, CredentialV2Presence,
+    CredentialV2RelayState, EndpointCheckpointV2, SecureCredentialV2Channel,
 };
 use crate::wire::{
     claim_commitment, decode_server_message, encode_client_message, ClaimToken, ClientMessage,
     ServerMessage, Side,
 };
 use std::fmt;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Exact caller-owned values for one protected credential/v2 allocation.
 pub struct CredentialV2AllocatorSessionInput {
+    /// Explicit transfer mode. Never inferred from `cpace_secret` bytes.
+    pub mode: CredentialV2AllocatorMode,
     /// Canonical application identifier bound into CPace.
     pub application_context: String,
     /// Canonical protected relay origin.
@@ -118,7 +120,8 @@ enum AllocatorState {
 pub struct CredentialV2AllocatorSession {
     template: CredentialV2Carrier,
     presence: Option<CredentialV2Presence>,
-    cpace_scalar: Zeroizing<[u8; 32]>,
+    cpace_scalar: Option<Zeroizing<[u8; 32]>>,
+    mode: CredentialV2AllocatorMode,
     profile_digest: [u8; 32],
     claim_commitment: [u8; 32],
     wrapping_key: Zeroizing<[u8; 32]>,
@@ -141,6 +144,13 @@ impl CredentialV2AllocatorSession {
         input: CredentialV2AllocatorSessionInput,
         body_verifier: Box<dyn CredentialV2BodyVerifier>,
     ) -> Result<Self, CredentialV2Error> {
+        if input.mode == CredentialV2AllocatorMode::Manual {
+            super::CredentialV2ManualWords::from_secret(input.cpace_secret)
+                .map_err(|_| CredentialV2Error::Schema)?;
+            if input.expected_allocator_key.is_none() {
+                return Err(CredentialV2Error::Profile);
+            }
+        }
         let claim = ClaimToken::new(input.claim_token);
         let commitment = claim_commitment(input.mailbox_id, &claim);
         let template = CredentialV2Carrier::new(CredentialV2CarrierInput {
@@ -159,7 +169,8 @@ impl CredentialV2AllocatorSession {
                 input.cpace_secret,
                 input.claim_token,
             )),
-            cpace_scalar: Zeroizing::new(input.cpace_scalar),
+            cpace_scalar: Some(Zeroizing::new(input.cpace_scalar)),
+            mode: input.mode,
             profile_digest: input.profile_digest,
             claim_commitment: commitment,
             wrapping_key: Zeroizing::new(input.checkpoint_wrapping_key),
@@ -173,7 +184,10 @@ impl CredentialV2AllocatorSession {
 
     /// Restore an allocator bootstrap or established endpoint from one exact
     /// sealed checkpoint. Caller-held carrier, generation, profile digest and
-    /// wrapping key are all mandatory bindings.
+    /// wrapping key are all mandatory bindings. Bootstrap mode must match its
+    /// authenticated tag (old v2 means Full). Established state has no mode.
+    /// `fresh_cpace_scalar` must be fresh shell CSPRNG output; it is retained
+    /// only before the first peer. Bound checkpoints use their retained scalar.
     #[allow(clippy::too_many_arguments)]
     pub fn restore(
         checkpoint: &[u8],
@@ -182,14 +196,18 @@ impl CredentialV2AllocatorSession {
         expected_generation: u64,
         expected_profile_digest: [u8; 32],
         now: u64,
+        expected_mode: CredentialV2AllocatorMode,
+        fresh_cpace_scalar: [u8; 32],
         body_verifier: Box<dyn CredentialV2BodyVerifier>,
     ) -> Result<Self, CredentialV2Error> {
+        let fresh_cpace_scalar = Zeroizing::new(fresh_cpace_scalar);
         if let Ok(bootstrap) = CredentialV2AllocatorBootstrap::restore_checkpoint(
             checkpoint,
             wrapping_key,
             &carrier,
             expected_generation,
             now,
+            expected_mode,
         ) {
             if bootstrap.profile_digest() != &expected_profile_digest {
                 return Err(CredentialV2Error::Profile);
@@ -197,7 +215,9 @@ impl CredentialV2AllocatorSession {
             return Ok(Self {
                 template: carrier.clone(),
                 presence: None,
-                cpace_scalar: Zeroizing::new([0; 32]),
+                cpace_scalar: (bootstrap.phase() == CredentialV2AllocatorBootstrapPhase::Allocated)
+                    .then(|| Zeroizing::new(*fresh_cpace_scalar)),
+                mode: expected_mode,
                 profile_digest: expected_profile_digest,
                 claim_commitment: *carrier.claim_commitment(),
                 wrapping_key: Zeroizing::new(*wrapping_key),
@@ -222,7 +242,8 @@ impl CredentialV2AllocatorSession {
         Ok(Self {
             template: carrier.clone(),
             presence: None,
-            cpace_scalar: Zeroizing::new([0; 32]),
+            cpace_scalar: None,
+            mode: expected_mode,
             profile_digest: expected_profile_digest,
             claim_commitment: *carrier.claim_commitment(),
             wrapping_key: Zeroizing::new(*wrapping_key),
@@ -281,12 +302,50 @@ impl CredentialV2AllocatorSession {
         }
     }
 
+    /// Return mode only while the bootstrap retains its authenticated authority.
+    /// Established state cannot authenticate or export a bootstrap mode.
+    #[must_use]
+    pub fn bootstrap_mode(&self) -> Option<CredentialV2AllocatorMode> {
+        match &self.state {
+            AllocatorState::Bootstrap(bootstrap) => Some(bootstrap.mode()),
+            _ => None,
+        }
+    }
+
     /// Reconstruct the human-presence code only while its one-use claim token
     /// remains inside a restored bootstrap checkpoint.
     pub fn presence_code(&self) -> Option<String> {
         match &self.state {
             AllocatorState::Bootstrap(bootstrap) => bootstrap.presence_code(),
             _ => None,
+        }
+    }
+
+    /// Export the exact retained carrier and presence for confidential local transfer.
+    /// Returns `None` before relay allocation, after claim admission, or when closed.
+    /// The shell controls display timing after checkpoint and application commits,
+    /// and clears displayed text at the retained carrier's original expiry.
+    pub fn handoff_text(&self) -> Result<Option<Zeroizing<String>>, CredentialV2Error> {
+        let AllocatorState::Bootstrap(bootstrap) = &self.state else {
+            return Ok(None);
+        };
+        bootstrap
+            .handoff()?
+            .map(|handoff| handoff.encode().map_err(|_| CredentialV2Error::Schema))
+            .transpose()
+    }
+
+    /// Export manual bootstrap and words only from a Manual bootstrap with live T.
+    /// The shell uses private callbacks after its durable allocation and hub commits,
+    /// and clears both values at the earlier authenticated hub/relay expiry.
+    /// Full mode refuses; pre-allocation, consumed, established and closed return None.
+    #[allow(clippy::type_complexity)] // Two zeroizing transfer strings; no additional container.
+    pub fn manual_transfer_text(
+        &self,
+    ) -> Result<Option<(Zeroizing<String>, Zeroizing<String>)>, CredentialV2Error> {
+        match &self.state {
+            AllocatorState::Bootstrap(bootstrap) => bootstrap.manual_transfer_text(),
+            _ => Ok(None),
         }
     }
 
@@ -325,11 +384,11 @@ impl CredentialV2AllocatorSession {
         if self.persistence_gate.is_some() {
             return Err(CredentialV2Error::Phase);
         }
-        let message = decode_server_message(input).map_err(|_| CredentialV2Error::Schema)?;
-        let result = self.apply_server(message, now, checkpoint_nonce);
+        let result = decode_server_message(input)
+            .map_err(|_| CredentialV2Error::Schema)
+            .and_then(|message| self.apply_server(message, now, checkpoint_nonce));
         if result.is_err() {
-            self.state = AllocatorState::Terminal;
-            self.after_persist.clear();
+            self.terminate();
         }
         result
     }
@@ -358,8 +417,7 @@ impl CredentialV2AllocatorSession {
         }
         let result = self.prepare_application_object_inner(object, now, checkpoint_nonce);
         if result.is_err() {
-            self.state = AllocatorState::Terminal;
-            self.after_persist.clear();
+            self.terminate();
         }
         result
     }
@@ -404,7 +462,7 @@ impl CredentialV2AllocatorSession {
             }
             ServerMessage::Pong => Ok(Vec::new()),
             ServerMessage::Closed(_) | ServerMessage::Error(_) => {
-                self.state = AllocatorState::Terminal;
+                self.terminate();
                 Ok(vec![CredentialV2AllocatorEffect::Terminal])
             }
             _ => Err(CredentialV2Error::Phase),
@@ -483,6 +541,7 @@ impl CredentialV2AllocatorSession {
             presence,
             self.profile_digest,
             CredentialV2RelayState::new(membership_token),
+            self.mode,
         )?));
         let carrier = self.carrier_bytes()?;
         self.checkpoint_bootstrap(
@@ -505,15 +564,41 @@ impl CredentialV2AllocatorSession {
         if matches!(self.state, AllocatorState::Established { .. }) {
             return self.peer_application_frame(peer_seq, frame, now, nonce);
         }
+        // A lost Ack may cause the relay to redeliver the exact first share.
+        // The persistence gate above prevents this path before its durable binding.
+        if peer_seq == 0 && self.bootstrap()?.peer_cpace().is_some() {
+            let bootstrap = self.bootstrap()?;
+            if now >= bootstrap.carrier().relay_expires_at() {
+                return Err(CredentialV2Error::Expired);
+            }
+            if bootstrap.peer_cpace() != Some(&frame) {
+                return Err(CredentialV2Error::Profile);
+            }
+            let mut effects = vec![CredentialV2AllocatorEffect::Send(relay_message(
+                ClientMessage::Ack { peer_seq },
+            )?)];
+            if let Some(sequence) = bootstrap.relay_state().cached_bootstrap_sequence()? {
+                let cached = bootstrap
+                    .cached_outbound_frame()
+                    .ok_or(CredentialV2Error::Phase)?;
+                effects.push(CredentialV2AllocatorEffect::Send(relay_message(
+                    ClientMessage::Put {
+                        seq: sequence,
+                        body: super::encode_frame(cached)?,
+                    },
+                )?));
+            }
+            return Ok(effects);
+        }
         let phase = self.bootstrap()?.phase();
         match phase {
             CredentialV2AllocatorBootstrapPhase::Allocated => {
-                let scalar = *self.cpace_scalar;
+                let scalar = self.cpace_scalar.take().ok_or(CredentialV2Error::Phase)?;
                 let (sequence, outbound) = {
                     let bootstrap = self.bootstrap_mut()?;
                     bootstrap.relay_state_mut().accept_peer_sequence(peer_seq)?;
                     bootstrap.claimant_admitted()?;
-                    let outbound = bootstrap.start_cpace(scalar)?;
+                    let outbound = bootstrap.start_cpace(*scalar)?;
                     bootstrap.retain_peer_cpace(&frame)?;
                     let sequence = bootstrap.relay_state_mut().queue_bootstrap_frame()?;
                     (sequence, outbound)
@@ -558,6 +643,25 @@ impl CredentialV2AllocatorSession {
         now: u64,
         nonce: CredentialV2CheckpointNonce,
     ) -> Result<Vec<CredentialV2AllocatorEffect>, CredentialV2Error> {
+        let (relay, expiry) = match &self.state {
+            AllocatorState::Bootstrap(bootstrap) => (
+                bootstrap.relay_state(),
+                bootstrap.carrier().relay_expires_at(),
+            ),
+            AllocatorState::Established {
+                relay, endpoint, ..
+            } => (relay.as_ref(), endpoint.carrier.relay_expires_at()),
+            _ => return Err(CredentialV2Error::Phase),
+        };
+        if relay.acknowledgement_already_applied(sequence) {
+            // A no-op must preserve the expiry gate otherwise enforced when
+            // this allocator seals its acknowledgement checkpoint.
+            return if now >= expiry {
+                Err(CredentialV2Error::Expired)
+            } else {
+                Ok(Vec::new())
+            };
+        }
         if matches!(self.state, AllocatorState::Established { .. }) {
             return self.application_acknowledged(sequence, now, nonce);
         }
@@ -793,6 +897,14 @@ impl CredentialV2AllocatorSession {
         }])
     }
 
+    fn terminate(&mut self) {
+        self.state = AllocatorState::Terminal;
+        self.presence = None;
+        self.cpace_scalar = None;
+        self.wrapping_key.zeroize();
+        self.after_persist.clear();
+    }
+
     fn carrier_bytes(&self) -> Result<Vec<u8>, CredentialV2Error> {
         encode_carrier(self.bootstrap()?.carrier())
     }
@@ -815,3 +927,6 @@ impl CredentialV2AllocatorSession {
 fn relay_message(message: ClientMessage) -> Result<Vec<u8>, CredentialV2Error> {
     encode_client_message(&message).map_err(|_| CredentialV2Error::Schema)
 }
+
+#[cfg(test)]
+mod tests;
