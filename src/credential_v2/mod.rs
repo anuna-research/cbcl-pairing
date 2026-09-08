@@ -3,6 +3,7 @@
 //! These types are disjoint from credential/v1. Generic bytes or a caller
 //! version cannot select this protocol.
 
+mod account_select;
 mod allocator;
 mod bootstrap;
 mod carrier;
@@ -19,6 +20,9 @@ mod manual;
 mod object;
 mod presence;
 
+pub use account_select::{
+    account_select_intent_digest, CredentialV2AccountSelect, ACCOUNT_SELECT_DOMAIN,
+};
 pub use allocator::{
     CredentialV2AllocatorEffect, CredentialV2AllocatorSession, CredentialV2AllocatorSessionInput,
 };

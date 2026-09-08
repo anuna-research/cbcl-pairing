@@ -34,11 +34,13 @@ pub enum CredentialV2Kind {
     Payload,
     /// Allocator authenticated receipt.
     Receipt,
+    /// Claimant account selection, sent before any Offer (SPEC-080 CON-001).
+    AccountSelect,
 }
 
 impl CredentialV2Kind {
     /// Every kind in its fixed numeric assignment order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Offer,
         Self::IntentApprove,
         Self::IntentDecline,
@@ -50,6 +52,7 @@ impl CredentialV2Kind {
         Self::FinalDecline,
         Self::Payload,
         Self::Receipt,
+        Self::AccountSelect,
     ];
 
     /// Return the exact protocol integer.
@@ -67,6 +70,7 @@ impl CredentialV2Kind {
             Self::FinalDecline => 8,
             Self::Payload => 9,
             Self::Receipt => 10,
+            Self::AccountSelect => 11,
         }
     }
 
