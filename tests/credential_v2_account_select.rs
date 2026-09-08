@@ -10,10 +10,6 @@ const CEREMONY: [u8; 32] = [0x21; 32];
 const APPLICATION: &str = "https://chat.anuna.io/selfsame/v2";
 const SCOPE: [u8; 32] = [0x32; 32];
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 fn vectors() -> serde_json::Value {
     serde_json::from_str(include_str!("../vectors/credential-v2-account-select.json")).unwrap()
 }
@@ -32,19 +28,22 @@ fn encodings_match_the_checked_in_vectors_and_round_trip() {
     let vectors = vectors();
     assert_eq!(
         vectors["intent_digest_hex"].as_str().unwrap(),
-        hex(&account_select_intent_digest())
+        hex::encode(account_select_intent_digest())
     );
     for (name, scope) in [("none", None), ("scope", Some(SCOPE))] {
         let selection = CredentialV2AccountSelect::new(CEREMONY, APPLICATION, scope).unwrap();
         let body = selection.encode();
-        assert_eq!(vectors[name]["body_hex"].as_str().unwrap(), hex(&body));
+        assert_eq!(
+            vectors[name]["body_hex"].as_str().unwrap(),
+            hex::encode(&body)
+        );
         assert_eq!(CredentialV2AccountSelect::decode(&body).unwrap(), selection);
         let object = selection.object().unwrap();
         assert_eq!(object.kind(), CredentialV2Kind::AccountSelect);
         assert_eq!(object.padding_len(), CONTROL_PADDING_BYTES);
         assert_eq!(
             vectors[name]["content_hash_hex"].as_str().unwrap(),
-            hex(&object.content_hash())
+            hex::encode(object.content_hash())
         );
         let decoded = decode_object(object.as_bytes()).unwrap();
         assert_eq!(
@@ -207,13 +206,16 @@ fn recognition_binds_kind_digest_ceremony_and_application() {
 #[test]
 #[ignore = "prints the vector values for vectors/credential-v2-account-select.json"]
 fn print_vectors() {
-    println!("intent_digest_hex {}", hex(&account_select_intent_digest()));
+    println!(
+        "intent_digest_hex {}",
+        hex::encode(account_select_intent_digest())
+    );
     for (name, scope) in [("none", None), ("scope", Some(SCOPE))] {
         let selection = CredentialV2AccountSelect::new(CEREMONY, APPLICATION, scope).unwrap();
-        println!("{name} body_hex {}", hex(&selection.encode()));
+        println!("{name} body_hex {}", hex::encode(selection.encode()));
         println!(
             "{name} content_hash_hex {}",
-            hex(&selection.object().unwrap().content_hash())
+            hex::encode(selection.object().unwrap().content_hash())
         );
     }
 }
