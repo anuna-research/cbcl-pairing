@@ -4,7 +4,7 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.10-draft
+version: 0.5.11-draft
 last-updated: 2026-09-05
 owner-repo: cbcl-pairing
 implementation-status: credential-v1-local-complete; credential-v2-local-complete
@@ -1742,7 +1742,7 @@ credential-v2-object = credential-v2-control-object / credential-v2-large-object
 
 credential-v2-control-object = {
   0: 2,
-  1: 1..8,
+  1: 1..8 / 11,
   2: bstr .size 32,
   3: 1..2048,
   4: bstr .size 4096
@@ -1771,10 +1771,34 @@ Field 1 assigns exactly one integer to each kind:
 8  final-decline
 9  payload
 10 receipt
+11 account-select
 ```
 
 No list order, enum declaration order, caller value, or version-1 assignment
 can replace this table.
+
+`account-select` (cbcl-bus [[SPEC-080-selfsame-account-continuity]] CON-001)
+is the one object admitted before the Offer. The claimant sends it exactly
+once, at `begin`; the endpoint moves to `account-selected`, from which only an
+Offer advances. It carries the fixed pre-intent digest
+`SHA-256("cbcl-pairing credential/v2 account-select intent/v1")`, which the
+endpoint checks and never adopts as the ceremony intent, and this
+deterministic-CBOR body bound to the carrier ceremony and the recognised
+application:
+
+```cddl
+credential-v2-account-select-body = [
+  "selfsame-account-select/v1",
+  bstr .size 32,           ; carrierCeremonyId
+  tstr .size (1..2048),    ; applicationId, equal to the carrier's application context
+  [ 0 ] / [ 1, bstr .size 32 ]   ; new account / existing account scope
+]
+```
+
+A second selection, one after an Offer, one from the allocator, one for another
+ceremony or application, or one under another digest refuses and is terminal.
+An allocator checkpoint at `account-selected` records the selection as its last
+object with no intent; a claimant never checkpoints there.
 
 Only `offer`, `payload`, and `receipt` use the large arm. Every other kind uses
 the control arm. The receipt needs the large arm for the closed signed hub
@@ -2230,7 +2254,7 @@ Accept control lengths 1, 23, 24, 255, 256, 2,047, and 2,048. Refuse 0, 2,049,
 Accept large lengths through 62,000 and refuse 62,001. Require exact encoded
 object lengths for every integer-head boundary.
 
-Require kind integers 0 through 10 to map exactly to CON-028's table. Require
+Require kind integers 0 through 11 to map exactly to CON-028's table. Require
 offer 0, payload 9, and receipt 10 to use only the large arm. Require every
 other kind to use only the control arm. A receipt encoded as control, a
 permuted kind assignment, or an integer outside its arm refuses.
@@ -2348,7 +2372,7 @@ Two independent implementations consume only the current parent. They
 reproduce the thirteen-member public context, `TH`, and `PRK`. They reproduce
 all seven HKDF outputs, both Finished values, and every directional nonce. They
 also reproduce exact AAD bytes, sealed frames, content hashes, and predecessors.
-They assign the eleven object kinds exactly to integers 0 through 10.
+They assign the twelve object kinds exactly to integers 0 through 11.
 They also reproduce the exact checkpoint-key info, extract, expand, and
 32-octet output for both endpoint roles.
 
@@ -2499,6 +2523,12 @@ explicit legacy input retain their encodings; old clients cannot consume SSPAIR1
 - 0.5.5-draft — coordinates the corrected Selfsame and hub parent pointers.
   The credential/v2 protocol bytes and checkpoint rules remain unchanged. No
   production action is authorized.
+
+- 0.5.11-draft — adds the `account-select` object (kind 11) admitted once
+  before the Offer, its body language, the `account-selected` endpoint phase
+  and its allocator checkpoint projection, for cbcl-bus SPEC-080 account
+  continuity. Every existing kind, arm, digest and checkpoint byte is
+  unchanged. No production action is authorized.
 
 - 0.5.4-draft — limits null checkpoint expiry to the claimant after durable
   payload send. The allocator keeps its numeric expiry and defers post-expiry

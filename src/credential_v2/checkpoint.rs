@@ -717,6 +717,14 @@ fn consistent_projection(
 ) -> bool {
     match (phase, intent_digest, last) {
         (CredentialV2Phase::Begin, None, None) => true,
+        (CredentialV2Phase::AccountSelected, None, Some(last)) => {
+            last.sender == Side::Claimant
+                && last_kind(last)
+                    == Some((
+                        CredentialV2Kind::AccountSelect,
+                        super::account_select_intent_digest(),
+                    ))
+        }
         (CredentialV2Phase::Offered, Some(intent), Some(last)) => {
             last_kind(last) == Some((CredentialV2Kind::Offer, intent))
         }
@@ -916,6 +924,7 @@ const fn phase_number(phase: CredentialV2Phase) -> u8 {
         CredentialV2Phase::FinalApproved => 5,
         CredentialV2Phase::PayloadSent => 6,
         CredentialV2Phase::Terminal => 7,
+        CredentialV2Phase::AccountSelected => 8,
     }
 }
 
@@ -929,6 +938,7 @@ const fn number_phase(value: u8) -> Result<CredentialV2Phase, CredentialV2Error>
         5 => Ok(CredentialV2Phase::FinalApproved),
         6 => Ok(CredentialV2Phase::PayloadSent),
         7 => Ok(CredentialV2Phase::Terminal),
+        8 => Ok(CredentialV2Phase::AccountSelected),
         _ => Err(CredentialV2Error::Schema),
     }
 }

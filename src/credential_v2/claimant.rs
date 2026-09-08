@@ -381,7 +381,8 @@ impl CredentialV2ClaimantSession {
             || self.phase != ClaimantPhase::Established
             || !matches!(
                 object.kind(),
-                CredentialV2Kind::IntentApprove
+                CredentialV2Kind::AccountSelect
+                    | CredentialV2Kind::IntentApprove
                     | CredentialV2Kind::IntentDecline
                     | CredentialV2Kind::Preparation
                     | CredentialV2Kind::Refusal
@@ -962,7 +963,10 @@ impl CredentialV2ClaimantSession {
             .open(&frame)?;
         let object = decode_object(&plaintext)?;
         let endpoint = self.endpoint.as_mut().ok_or(CredentialV2Error::Phase)?;
-        let advance = if endpoint.phase() == CredentialV2Phase::Begin {
+        let advance = if matches!(
+            endpoint.phase(),
+            CredentialV2Phase::Begin | CredentialV2Phase::AccountSelected
+        ) {
             if object.kind() != CredentialV2Kind::Offer {
                 return Err(CredentialV2Error::Phase);
             }

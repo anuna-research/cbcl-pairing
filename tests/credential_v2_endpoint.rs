@@ -633,3 +633,185 @@ fn exchange(
     assert_eq!(receiver.receive(object), Ok(CredentialV2Advance::Advanced));
     assert_eq!(sender.phase(), receiver.phase());
 }
+
+// ---- SPEC-080 CON-001: the claimant's account selection before the Offer ----
+
+const APPLICATION: &str = "https://chat.anuna.io/selfsame/v2";
+
+fn selection(scope: Option<[u8; 32]>) -> CredentialV2Object {
+    cbcl_pairing::credential_v2::CredentialV2AccountSelect::new(CEREMONY, APPLICATION, scope)
+        .unwrap()
+        .object()
+        .unwrap()
+}
+
+#[test]
+fn spec_080_account_select_precedes_the_offer_and_never_becomes_the_intent() {
+    let (mut allocator, mut claimant) = endpoints();
+    let select = selection(Some([0x99; 32]));
+    assert_eq!(claimant.send(&select), Ok(CredentialV2Advance::Advanced));
+    assert_eq!(claimant.phase(), CredentialV2Phase::AccountSelected);
+    assert_eq!(
+        allocator.receive(&select),
+        Ok(CredentialV2Advance::Advanced)
+    );
+    assert_eq!(allocator.phase(), CredentialV2Phase::AccountSelected);
+    assert_eq!(
+        allocator.receive(&select),
+        Ok(CredentialV2Advance::ExactRetransmission)
+    );
+
+    // The Offer is still admitted on both sides, and it alone fixes the intent.
+    let offer = offer();
+    assert_eq!(allocator.send(&offer), Ok(CredentialV2Advance::Advanced));
+    assert!(matches!(
+        claimant.receive_offer(&offer, &authority(), &mut Parser, &mut IntentVerifier),
+        Ok(CredentialV2Advance::DisplayIntent(_))
+    ));
+    assert_eq!(allocator.phase(), CredentialV2Phase::Offered);
+    assert_eq!(claimant.phase(), CredentialV2Phase::Offered);
+
+    // Every later object is bound to the Offer's intent, as before.
+    let approve = successor(CredentialV2Kind::IntentApprove, &offer);
+    exchange(&mut claimant, &mut allocator, &approve);
+    assert_eq!(claimant.phase(), CredentialV2Phase::IntentApproved);
+    let stale = CredentialV2Object::new(
+        CredentialV2Kind::Preparation,
+        cbcl_pairing::credential_v2::account_select_intent_digest(),
+        successor(CredentialV2Kind::Preparation, &approve)
+            .body()
+            .to_vec(),
+    )
+    .unwrap();
+    assert_eq!(claimant.send(&stale), Err(CredentialV2Error::Profile));
+}
+
+#[test]
+fn spec_080_a_selection_after_the_offer_or_a_second_one_is_terminal() {
+    let none = selection(None);
+    let (mut allocator, mut claimant) = endpoints();
+    claimant.send(&none).unwrap();
+    allocator.receive(&none).unwrap();
+    let second = selection(Some([0x01; 32]));
+    assert_eq!(claimant.send(&second), Err(CredentialV2Error::Phase));
+    assert_eq!(claimant.phase(), CredentialV2Phase::Terminal);
+    assert_eq!(allocator.receive(&second), Err(CredentialV2Error::Phase));
+    assert_eq!(allocator.phase(), CredentialV2Phase::Terminal);
+
+    let (mut allocator, mut claimant) = endpoints();
+    let offer = offer();
+    allocator.send(&offer).unwrap();
+    claimant
+        .receive_offer(&offer, &authority(), &mut Parser, &mut IntentVerifier)
+        .unwrap();
+    assert_eq!(claimant.send(&none), Err(CredentialV2Error::Phase));
+    assert_eq!(allocator.receive(&none), Err(CredentialV2Error::Phase));
+}
+
+#[test]
+fn spec_080_a_selection_binds_ceremony_application_sender_and_digest() {
+    let foreign_ceremony =
+        cbcl_pairing::credential_v2::CredentialV2AccountSelect::new([0x77; 32], APPLICATION, None)
+            .unwrap()
+            .object()
+            .unwrap();
+    let (mut allocator, _) = endpoints();
+    assert_eq!(
+        allocator.receive(&foreign_ceremony),
+        Err(CredentialV2Error::Profile)
+    );
+
+    let foreign_application = cbcl_pairing::credential_v2::CredentialV2AccountSelect::new(
+        CEREMONY,
+        "https://other.example/selfsame/application",
+        None,
+    )
+    .unwrap()
+    .object()
+    .unwrap();
+    let (mut allocator, _) = endpoints();
+    assert_eq!(
+        allocator.receive(&foreign_application),
+        Err(CredentialV2Error::Profile)
+    );
+
+    let (mut allocator, mut claimant) = endpoints();
+    assert_eq!(
+        allocator.send(&selection(None)),
+        Err(CredentialV2Error::Direction)
+    );
+    assert_eq!(
+        claimant.receive(&selection(None)),
+        Err(CredentialV2Error::Direction)
+    );
+
+    let forged_digest = CredentialV2Object::new(
+        CredentialV2Kind::AccountSelect,
+        [0; 32],
+        cbcl_pairing::credential_v2::CredentialV2AccountSelect::new(CEREMONY, APPLICATION, None)
+            .unwrap()
+            .encode(),
+    )
+    .unwrap();
+    let (mut allocator, _) = endpoints();
+    assert_eq!(
+        allocator.receive(&forged_digest),
+        Err(CredentialV2Error::Schema)
+    );
+}
+
+#[test]
+fn spec_080_only_the_allocator_checkpoints_the_selection_and_restores_it_exactly() {
+    let (mut allocator, mut claimant) = endpoints();
+    let (mut allocator_channel, mut claimant_channel) = secure_channels();
+    let mut claimant_relay = CredentialV2RelayState::new([0xc3; 32]);
+    let allocator_relay = CredentialV2RelayState::new([0xc4; 32]);
+    let select = selection(Some([0x99; 32]));
+    let frame = claimant
+        .prepare_outbound(&select, &mut claimant_channel, &mut claimant_relay)
+        .unwrap();
+    assert_eq!(allocator_channel.open(&frame).unwrap(), select.as_bytes());
+    allocator.receive(&select).unwrap();
+    let wrapping_key = [0xc1; 32];
+    assert!(matches!(
+        claimant.seal_checkpoint(
+            &claimant_channel,
+            &claimant_relay,
+            &wrapping_key,
+            1,
+            Some(1_800_000_900),
+            CredentialV2CheckpointNonce::from_csprng([0xc2; 12]),
+            1_800_000_800,
+        ),
+        Err(CredentialV2Error::Phase)
+    ));
+    let checkpoint = allocator
+        .seal_checkpoint(
+            &allocator_channel,
+            &allocator_relay,
+            &wrapping_key,
+            1,
+            Some(1_800_000_900),
+            CredentialV2CheckpointNonce::from_csprng([0xc2; 12]),
+            1_800_000_800,
+        )
+        .unwrap();
+    let restored = CredentialV2Endpoint::restore_checkpoint(
+        checkpoint.as_bytes(),
+        &wrapping_key,
+        Side::Allocator,
+        &carrier(),
+        1,
+        1_800_000_800,
+        Box::new(BodyVerifier::default()),
+    )
+    .unwrap();
+    let (mut restored, _, _) = restored.into_parts();
+    assert_eq!(restored.phase(), CredentialV2Phase::AccountSelected);
+    assert_eq!(
+        restored.receive(&select),
+        Ok(CredentialV2Advance::ExactRetransmission)
+    );
+    assert_eq!(restored.send(&offer()), Ok(CredentialV2Advance::Advanced));
+    assert_eq!(restored.phase(), CredentialV2Phase::Offered);
+}

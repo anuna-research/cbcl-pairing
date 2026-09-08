@@ -33,3 +33,10 @@ path = "fuzz_targets/channel_receiver.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "account_select"
+path = "fuzz_targets/account_select.rs"
+test = false
+doc = false
+bench = false

@@ -1,8 +1,8 @@
 use super::{
     decode_canonical, field, fixed_bytes, map_entries, recognise_credential_v2_intent,
-    CredentialV2Carrier, CredentialV2Display, CredentialV2Error, CredentialV2Frame,
-    CredentialV2IntentAuthority, CredentialV2IntentVerifier, CredentialV2Kind, CredentialV2Object,
-    CredentialV2OfferParser, CredentialV2RelayState, SecureCredentialV2Channel,
+    CredentialV2AccountSelect, CredentialV2Carrier, CredentialV2Display, CredentialV2Error,
+    CredentialV2Frame, CredentialV2IntentAuthority, CredentialV2IntentVerifier, CredentialV2Kind,
+    CredentialV2Object, CredentialV2OfferParser, CredentialV2RelayState, SecureCredentialV2Channel,
 };
 use crate::wire::Side;
 use sha2::{Digest, Sha256};
@@ -15,6 +15,9 @@ use subtle::ConstantTimeEq;
 pub enum CredentialV2Phase {
     /// No offer has been accepted.
     Begin,
+    /// The claimant's account selection is current; no offer has been accepted
+    /// (SPEC-080 CON-001).
+    AccountSelected,
     /// The authenticated offer is current.
     Offered,
     /// Preliminary approval is current.
@@ -222,7 +225,7 @@ impl CredentialV2Endpoint {
             return result;
         }
         if self.side != Side::Claimant
-            || self.phase != CredentialV2Phase::Begin
+            || !pre_offer(self.phase)
             || object.kind() != CredentialV2Kind::Offer
         {
             return self.fail(CredentialV2Error::Phase);
@@ -339,11 +342,27 @@ impl CredentialV2Endpoint {
             return self.fail(CredentialV2Error::Direction);
         }
 
+        // SPEC-080 CON-001: the one object before the Offer. It carries the
+        // fixed pre-intent digest, binds the ceremony and the recognised
+        // application, and is admitted exactly once, at `Begin`, from the
+        // claimant. It never becomes the ceremony's intent.
+        if object.kind() == CredentialV2Kind::AccountSelect {
+            if self.phase != CredentialV2Phase::Begin || self.last.is_some() {
+                return self.fail(CredentialV2Error::Phase);
+            }
+            if let Err(error) = CredentialV2AccountSelect::recognise(
+                object,
+                self.carrier.carrier_ceremony_id(),
+                self.carrier.application_context(),
+            ) {
+                return self.fail(error);
+            }
+            self.accept(object, sender, CredentialV2Phase::AccountSelected);
+            return Ok(CredentialV2Advance::Advanced);
+        }
+
         if object.kind() == CredentialV2Kind::Offer {
-            if sender != Side::Allocator
-                || self.side != Side::Allocator
-                || self.phase != CredentialV2Phase::Begin
-            {
+            if sender != Side::Allocator || self.side != Side::Allocator || !pre_offer(self.phase) {
                 return self.fail(CredentialV2Error::Phase);
             }
             self.intent_digest = Some(*object.intent_digest());
@@ -404,7 +423,7 @@ impl CredentialV2Endpoint {
     }
 
     fn accept(&mut self, object: &CredentialV2Object, sender: Side, next: CredentialV2Phase) {
-        if self.intent_digest.is_none() {
+        if self.intent_digest.is_none() && object.kind() != CredentialV2Kind::AccountSelect {
             self.intent_digest = Some(*object.intent_digest());
         }
         self.last = Some(LastObject {
@@ -510,9 +529,18 @@ const fn valid_sender(kind: CredentialV2Kind, sender: Side) -> bool {
         | CredentialV2Kind::Preparation
         | CredentialV2Kind::FinalApprove
         | CredentialV2Kind::FinalDecline
-        | CredentialV2Kind::Payload => matches!(sender, Side::Claimant),
+        | CredentialV2Kind::Payload
+        | CredentialV2Kind::AccountSelect => matches!(sender, Side::Claimant),
         CredentialV2Kind::Refusal => true,
     }
+}
+
+/// The phases in which an Offer is still admissible.
+const fn pre_offer(phase: CredentialV2Phase) -> bool {
+    matches!(
+        phase,
+        CredentialV2Phase::Begin | CredentialV2Phase::AccountSelected
+    )
 }
 
 fn next_phase(phase: CredentialV2Phase, kind: CredentialV2Kind) -> Option<CredentialV2Phase> {
