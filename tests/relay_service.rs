@@ -455,3 +455,39 @@ fn test_028_nameplate_sampling_rejects_the_biased_tail() {
     assert_eq!(sampled, 999_999_999);
     assert!(candidates.next().is_none());
 }
+
+#[test]
+fn shortest_nameplate_skips_reserved_slots_and_reuses_after_expiry() {
+    let mut relay = RelayService::new(config([0x11; 32], true)).unwrap();
+    assert_eq!(relay.first_available_nameplate(), Some(1));
+    for slot in 1_u8..=2 {
+        bind(&mut relay, u64::from(slot), 1_000);
+        let nameplate = relay.first_available_nameplate().unwrap();
+        assert_eq!(nameplate, u32::from(slot));
+        let replies = handle(
+            &mut relay,
+            u64::from(slot),
+            1_000,
+            randomness(slot, slot + 10, nameplate),
+            ClientMessage::Allocate {
+                locator_mode: 1,
+                ttl_seconds: Some(60),
+            },
+        );
+        assert!(matches!(
+            replies[0].message,
+            ServerMessage::Allocated { .. }
+        ));
+    }
+    handle(
+        &mut relay,
+        1,
+        1_001,
+        randomness(30, 31, 32),
+        ClientMessage::Close,
+    );
+    // The upstream tombstone still reserves its locator until original expiry.
+    assert_eq!(relay.first_available_nameplate(), Some(3));
+    relay.sweep(1_061).unwrap();
+    assert_eq!(relay.first_available_nameplate(), Some(1));
+}

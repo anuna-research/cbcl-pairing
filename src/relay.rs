@@ -327,6 +327,24 @@ impl RelayService {
         self.mailboxes.len()
     }
 
+    /// Return the smallest unused positive numeric locator. This is an operator
+    /// allocation policy, not password entropy. Call under the same lock as
+    /// allocation, after sweeping expiry. Work is bounded by retained nameplates.
+    #[must_use]
+    pub fn first_available_nameplate(&self) -> Option<u32> {
+        let mut candidate = 1;
+        for &occupied in self.nameplates.keys() {
+            if occupied < candidate {
+                continue;
+            }
+            if occupied != candidate {
+                break;
+            }
+            candidate += 1;
+        }
+        (candidate <= 999_999_999).then_some(candidate)
+    }
+
     /// Disable all future allocations immediately. Existing mailboxes retain
     /// their original expiry and continue to support delivery and closure.
     pub fn disable_allocation(&mut self) {
