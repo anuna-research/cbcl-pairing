@@ -4,8 +4,8 @@ title: Reusable blind pairing
 status: draft
 tier: 1
 mode: reference
-version: 0.5.11-draft
-last-updated: 2026-09-05
+version: 0.5.12-draft
+last-updated: 2026-09-12
 owner-repo: cbcl-pairing
 implementation-status: credential-v1-local-complete; credential-v2-local-complete
 implementation-baseline: 62ef4a968b46b4836374fcee1d78c410f730a7a7
@@ -111,7 +111,7 @@ authority after review.
 - Each membership queues at most 16 frames of at most 69,632 octets under
   [[SPEC-001-reusable-blind-pairing#NFR-002]] and
   [[SPEC-001-reusable-blind-pairing#NFR-004]].
-- Credential/v1 mailbox lifetime remains 60–600 seconds under
+- Credential/v1 mailbox lifetime is 60–86,400 seconds under
   [[SPEC-001-reusable-blind-pairing#NFR-005]].
 - A maximum-size wire message completes recognition within 100 milliseconds
   under [[SPEC-001-reusable-blind-pairing#NFR-009]].
@@ -523,7 +523,7 @@ Trace:
 
 ### NFR-005: Mailbox lifetime is bounded
 
-Each credential/v1 mailbox lifetime SHALL be between 60 and 600 seconds. Its
+Each credential/v1 mailbox lifetime SHALL be between 60 and 86,400 seconds. Its
 default is 600 seconds. Credential/v2 follows
 [[SPEC-001-reusable-blind-pairing#NFR-023]]. Allocation returns the immutable
 absolute expiry for either version.
@@ -708,6 +708,9 @@ information, fragment, or non-root path.
 Locator mode 0 carries a 32-octet mailbox identifier. Locator mode 1 carries a
 numeric nameplate in `0..999999999`. A nameplate contributes no secret entropy.
 The reference shell rejection-samples a uniform value from this exact range.
+An operator shell may instead select the smallest unused positive nameplate.
+Selection and allocation share the relay lock after expiry sweep. Retained
+tombstones reserve their names until original expiry; existing locators are not rewritten.
 
 The invitation never enters the relay as one object. Carrier decoding yields
 exact PRS octets without normalization or case folding.
@@ -1621,7 +1624,7 @@ claimed-v2 = {
 
 An omitted `ttl-seconds` in `allocate-v2` selects 900 seconds. Any other
 credential/v2 value refuses before mailbox allocation. Credential/v1 keeps its
-60-through-600 range and 600-second default unchanged.
+60-through-86,400 range and 600-second default.
 
 The committed schema contains one closed client union and one closed server
 union. Duplicate keys, extras, trailing bytes, and non-canonical encoding
@@ -2198,7 +2201,7 @@ before response. Restart yields exactly pending or claimed state.
 Inspect snapshots, stores, heap retention, logs, metrics, traces, and errors.
 No claim bearer survives, and no commitment survives successful admission.
 
-For credential/v1, accept lifetimes 60 and 600 and refuse 59 and 601. Require
+For credential/v1, accept lifetimes 60, 600, 65,536, and 86,400; refuse 59 and 86,401. Require
 the unchanged 600-second default. For credential/v2, accept only 900. Refuse
 599, 600, 899, and 901. Require the 900-second default and immutable returned
 expiry. Re-run version-1 wire vectors byte-identically.
@@ -2566,3 +2569,14 @@ explicit legacy input retain their encodings; old clients cannot consume SSPAIR1
   production holds.
 
 </details>
+
+## Handoff lifetime clarification — 2026-09-12
+
+Owner direction restores the previously deployed short-nameplate and day-long
+Handoff behavior. This amendment corrects stale prose after the implementation
+merged in `05480d8`; it does not change protocol code.
+[[SPEC-001-reusable-blind-pairing#NFR-005]], [[SPEC-001-reusable-blind-pairing#CON-026]],
+and [[SPEC-001-reusable-blind-pairing#TEST-060]] now describe the accepted v1 bounds.
+Credential/v2 retains exactly 900 seconds. Existing wire integer encoding is unchanged.
+Evidence: `tests/mailbox.rs`, `tests/recognition.rs`, `tests/relay_service.rs`;
+independent review and executed checks are recorded with the restoration change.
