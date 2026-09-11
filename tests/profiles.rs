@@ -177,6 +177,9 @@ fn test_010_profiles_are_endpoint_local_and_describe_their_carriers() {
 
 #[test]
 fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
+    // Baseline includes a4f48c0 (short nameplate helper) and b03cef4 (v1 TTL
+    // extension). These are shared relay changes, not profile-specific assets.
+    // Keep literal pins so subsequent asset changes still require review.
     for (bytes, expected) in [
         (
             include_bytes!(concat!(
@@ -200,11 +203,11 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/schemas/pairing-v1.cddl"
             ))
             .as_slice(),
-            "8d676f35c8a9fe67cd96efe3e6a79ec9e0dfcc23211beed0776fdd4716491d8f",
+            "0dc60fe2c29a7e4fc967b2f875222984e4cdefcb57988c5ec5b163384a3b5964",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/mailbox.rs")).as_slice(),
-            "6e1c5a4ca4cc49a1daee00fba868c33be517e2b760ec30fc4d3609a3c4d6bfd6",
+            "aea4e928c826fef1e745ebe465355aca50a974b8d0c27c065133aac9e01bd0f1",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/storage.rs")).as_slice(),
@@ -212,7 +215,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/relay.rs")).as_slice(),
-            "87fc2d2dcd4e206d610ee4ece630b6d3bdf411967265a549093c49754eb68000",
+            "8cb7a85bee4dfc7d1ed1b7b7b3b549d061f68a8e75008b519fc3ec90f22144c2",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/limiter.rs")).as_slice(),
