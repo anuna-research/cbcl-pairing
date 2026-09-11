@@ -87,7 +87,7 @@ pub enum ClientMessage {
         /// Direct or nameplate locator mode.
         locator_mode: u8,
         /// Requested lifetime in seconds.
-        ttl_seconds: Option<u16>,
+        ttl_seconds: Option<u32>,
     },
     /// Claim a mailbox locator.
     Claim(Locator),

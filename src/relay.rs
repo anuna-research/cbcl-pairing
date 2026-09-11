@@ -384,7 +384,7 @@ impl RelayService {
         now: u64,
         randomness: RelayRandomness,
         locator_mode: u8,
-        ttl_seconds: Option<u16>,
+        ttl_seconds: Option<u32>,
     ) -> Result<Vec<RoutedMessage>, RelayError> {
         if !self.config.allocation_enabled {
             return Ok(vec![route(connection, ServerMessage::Error(503))]);

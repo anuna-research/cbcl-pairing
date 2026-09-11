@@ -14,7 +14,7 @@ fn hash(fill: u8) -> MembershipHash {
     MembershipHash::new([fill; 32])
 }
 
-fn input(ttl_seconds: Option<u16>) -> AllocationInput {
+fn input(ttl_seconds: Option<u32>) -> AllocationInput {
     AllocationInput {
         mailbox_id: [0x11; 32],
         nameplate: Some(123_456_789),
@@ -274,17 +274,17 @@ fn test_013_lifetime_bounds_terminal_deletion_and_original_expiry_reaping() {
         NOW + 60
     );
     assert_eq!(
-        Mailbox::allocate(input(Some(600)))
+        Mailbox::allocate(input(Some(86_400)))
             .expect("maximum TTL")
             .expires_at(),
-        NOW + 600
+        NOW + 86_400
     );
     assert_eq!(
         Mailbox::allocate(input(Some(59))),
         Err(MailboxError::LifetimeOutOfRange)
     );
     assert_eq!(
-        Mailbox::allocate(input(Some(601))),
+        Mailbox::allocate(input(Some(86_401))),
         Err(MailboxError::LifetimeOutOfRange)
     );
 
@@ -343,6 +343,29 @@ fn test_013_lifetime_bounds_terminal_deletion_and_original_expiry_reaping() {
         .is_some());
     assert!(reap(bounded.as_ref().expect("state"), expires_at)
         .expect("expires")
+        .state
+        .is_none());
+}
+
+#[test]
+fn extended_lifetime_survives_old_timeout_and_expires_at_requested_deadline() {
+    let mut mailbox = Some(Mailbox::allocate(input(Some(86_400))).unwrap());
+    apply(
+        &mut mailbox,
+        NOW + 601,
+        MailboxCommand::Put {
+            sender: Membership::Allocator,
+            seq: 0,
+            body: vec![7],
+        },
+    );
+    assert!(mailbox.is_some());
+    assert!(reap(mailbox.as_ref().unwrap(), NOW + 86_399)
+        .unwrap()
+        .state
+        .is_some());
+    assert!(reap(mailbox.as_ref().unwrap(), NOW + 86_400)
+        .unwrap()
         .state
         .is_none());
 }

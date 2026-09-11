@@ -325,13 +325,13 @@ fn test_005_rejects_numeric_and_body_boundaries() {
         Err(RecognitionError::Schema)
     );
 
-    let lifetime_601 = map(vec![
+    let lifetime_86401 = map(vec![
         ("type", text("allocate")),
         ("locator-mode", uint(1)),
-        ("ttl-seconds", uint(601)),
+        ("ttl-seconds", uint(86_401)),
     ]);
     assert_eq!(
-        decode_client_message(&encode(&lifetime_601)),
+        decode_client_message(&encode(&lifetime_86401)),
         Err(RecognitionError::Schema)
     );
 }
@@ -519,4 +519,16 @@ fn test_005_all_typed_values_roundtrip_to_identical_deterministic_bytes() {
         encode_application_payload(&typed).expect("encode payload"),
         canonical
     );
+}
+
+#[test]
+fn extended_v1_allocation_lifetimes_round_trip() {
+    for seconds in [600, 601, 3600, 65_536, 86_400] {
+        let command = cbcl_pairing::wire::ClientMessage::Allocate {
+            locator_mode: 1,
+            ttl_seconds: Some(seconds),
+        };
+        let bytes = cbcl_pairing::wire::encode_client_message(&command).unwrap();
+        assert_eq!(decode_client_message(&bytes).unwrap(), command);
+    }
 }
