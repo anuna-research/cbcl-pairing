@@ -1020,3 +1020,42 @@ fn a_replayed_channel_frame_is_refused_and_terminates_the_endpoint() {
     assert_eq!(allocator.terminal_reason(), Some(TerminalReason::Channel));
     assert!(allocator.secrets_erased());
 }
+
+#[test]
+fn approval_projection_waits_for_authenticated_decision_and_clears_on_terminal() {
+    for decision in [Decision::Approve, Decision::Decline] {
+        let (mut allocator, mut claimant) = confirmed_pair();
+        assert_eq!(allocator.approved_intent_digest(), None);
+        assert_eq!(claimant.approved_intent_digest(), None);
+        let intent_frame = allocator.send_intent(&intent()).unwrap();
+        claimant.receive_frame(&intent_frame).unwrap();
+        let digest = allocator.intent_digest().unwrap();
+        assert_eq!(allocator.approved_intent_digest(), None);
+        assert_eq!(claimant.approved_intent_digest(), None);
+        let answer = claimant.decide(decision).unwrap();
+        assert_eq!(allocator.approved_intent_digest(), None);
+        assert_eq!(
+            claimant.approved_intent_digest(),
+            if decision == Decision::Approve {
+                Some(digest)
+            } else {
+                None
+            }
+        );
+        allocator.receive_frame(&extract_frame(&answer)).unwrap();
+        assert_eq!(
+            allocator.approved_intent_digest(),
+            if decision == Decision::Approve {
+                Some(digest)
+            } else {
+                None
+            }
+        );
+        if decision == Decision::Approve {
+            allocator.cancel().unwrap();
+            claimant.cancel().unwrap();
+            assert_eq!(allocator.approved_intent_digest(), None);
+            assert_eq!(claimant.approved_intent_digest(), None);
+        }
+    }
+}

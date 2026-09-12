@@ -711,6 +711,18 @@ impl EndpointReducer {
         self.intent.as_ref().map(|value| value.digest)
     }
 
+    /// Current intent only after this endpoint has committed or authenticated
+    /// an approval decision. On the allocator this means the peer's approval
+    /// passed the protected channel and protocol monitor. This is a read-only
+    /// observation, not a reusable payload-send permit or application grant.
+    #[must_use]
+    pub fn approved_intent_digest(&self) -> Option<[u8; 32]> {
+        if self.terminal.is_some() || self.decision.as_ref()?.decision != Decision::Approve {
+            return None;
+        }
+        self.intent_digest()
+    }
+
     /// Number of application payloads released to the profile.
     #[must_use]
     pub fn delivered_payloads(&self) -> usize {
