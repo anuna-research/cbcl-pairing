@@ -172,7 +172,8 @@ fn queued_delivery_ack_reconnect_crowding_and_expiry_use_only_mailbox_semantics(
                 expires_at: 1_061,
             },
             ..
-        }]
+        }, RoutedMessage { message: ServerMessage::Frame { peer_seq: 0, body }, .. }]
+        if body == &opaque_agent
     ));
 
     // A connected put is routed only to the other membership.
@@ -454,4 +455,96 @@ fn test_028_nameplate_sampling_rejects_the_biased_tail() {
         .expect("second candidate is accepted");
     assert_eq!(sampled, 999_999_999);
     assert!(candidates.next().is_none());
+}
+
+#[test]
+fn direct_claim_delivers_preclaim_frames_after_membership_before_later_frames() {
+    let mut relay = RelayService::new(config([0x11; 32], true)).unwrap();
+    bind(&mut relay, 1, 1000);
+    handle(
+        &mut relay,
+        1,
+        1001,
+        randomness(0x22, 0x33, 0),
+        ClientMessage::Allocate {
+            locator_mode: 0,
+            ttl_seconds: Some(60),
+        },
+    );
+    for seq in 0..2 {
+        assert_eq!(
+            handle(
+                &mut relay,
+                1,
+                1002,
+                randomness(0, 0, 0),
+                ClientMessage::Put {
+                    seq,
+                    body: vec![seq + 10]
+                }
+            ),
+            vec![RoutedMessage {
+                connection: ConnectionId(1),
+                message: ServerMessage::Acknowledged { seq }
+            }]
+        );
+    }
+    bind(&mut relay, 2, 1003);
+    let claimed = handle(
+        &mut relay,
+        2,
+        1004,
+        randomness(0, 0x44, 0),
+        ClientMessage::Claim(Locator::Direct(MAILBOX_ID)),
+    );
+    assert_eq!(
+        claimed,
+        vec![
+            RoutedMessage {
+                connection: ConnectionId(2),
+                message: ServerMessage::Claimed {
+                    mailbox_id: MAILBOX_ID,
+                    membership_token: CLAIMANT_TOKEN,
+                    expires_at: 1061
+                }
+            },
+            RoutedMessage {
+                connection: ConnectionId(2),
+                message: ServerMessage::Frame {
+                    peer_seq: 0,
+                    body: vec![10]
+                }
+            },
+            RoutedMessage {
+                connection: ConnectionId(2),
+                message: ServerMessage::Frame {
+                    peer_seq: 1,
+                    body: vec![11]
+                }
+            },
+        ]
+    );
+    for peer_seq in 0..2 {
+        assert!(handle(
+            &mut relay,
+            2,
+            1005,
+            randomness(0, 0, 0),
+            ClientMessage::Ack { peer_seq }
+        )
+        .is_empty());
+    }
+    relay.disconnect(ConnectionId(2));
+    bind(&mut relay, 3, 1006);
+    assert!(handle(
+        &mut relay,
+        3,
+        1007,
+        randomness(0, 0, 0),
+        ClientMessage::Open {
+            mailbox_id: MAILBOX_ID,
+            membership_token: CLAIMANT_TOKEN
+        }
+    )
+    .is_empty());
 }

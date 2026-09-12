@@ -469,6 +469,24 @@ impl RelayService {
             MailboxEffect::Terminal(reason) => Some(*reason),
             _ => None,
         });
+        let deliveries: Vec<_> = transition
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                MailboxEffect::Deliver {
+                    recipient: Membership::Claimant,
+                    peer_seq,
+                    body,
+                } => Some(route(
+                    connection,
+                    ServerMessage::Frame {
+                        peer_seq: *peer_seq,
+                        body: body.clone(),
+                    },
+                )),
+                _ => None,
+            })
+            .collect();
         self.commit(mailbox_id, transition)?;
         if let Some(expires_at) = claimed {
             self.attach(
@@ -478,14 +496,16 @@ impl RelayService {
                     membership: Membership::Claimant,
                 },
             );
-            Ok(vec![route(
+            let mut messages = vec![route(
                 connection,
                 ServerMessage::Claimed {
                     mailbox_id,
                     membership_token,
                     expires_at,
                 },
-            )])
+            )];
+            messages.extend(deliveries);
+            Ok(messages)
         } else if let Some(reason) = terminal {
             let mut messages = self.terminal_routes(mailbox_id, reason);
             messages.push(route(connection, ServerMessage::Closed(reason)));

@@ -646,12 +646,22 @@ pub fn transition(
                         frames: Vec::new(),
                     });
                     next.status = MailboxStatus::Paired;
+                    let mut effects = vec![MailboxEffect::Claimed {
+                        membership: Membership::Claimant,
+                        expires_at: state.expires_at,
+                    }];
+                    // The first connection must receive frames stored before
+                    // admission without requiring a separate membership reopen.
+                    effects.extend(next.allocator.frames.iter().filter_map(|frame| {
+                        frame.body.as_ref().map(|body| MailboxEffect::Deliver {
+                            recipient: Membership::Claimant,
+                            peer_seq: frame.seq,
+                            body: body.clone(),
+                        })
+                    }));
                     Ok(MailboxTransition {
                         state: Some(next),
-                        effects: vec![MailboxEffect::Claimed {
-                            membership: Membership::Claimant,
-                            expires_at: state.expires_at,
-                        }],
+                        effects,
                     })
                 }
                 Some(claimant) if claimant.hash == claimant_hash => {
