@@ -11,6 +11,9 @@ use sha2::{Digest, Sha256};
 use std::{fmt, io::Cursor};
 use url::Url;
 
+/// Pairing-bound personal archive enrollment descriptor profile.
+pub mod archive;
+
 /// Agent pairing application identifier.
 pub const AGENT_APPLICATION: &str = "anuna.io/agent/v1";
 /// Exact agent intent action.
