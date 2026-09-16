@@ -91,7 +91,8 @@ target/debug/cbcl-pairing-relay-ws \
   --listen 127.0.0.1:7443 \
   --operator-key-file ./operator.key \
   --store-dir ./mailboxes \
-  --enable-conformance-allocation
+  --enable-conformance-allocation \
+  --allow-origin https://pair.example
 ```
 
 The process prints its resolved listen address once. The enabling flag is not a
@@ -156,3 +157,56 @@ gate still requires the named integration-review disposition.
 `tests/websocket_process.rs` starts the standard WebSocket shell, connects two
 real clients, routes an opaque frame asynchronously, rejects text frames, and
 checks that process logs contain neither mailbox IDs nor bodies.
+
+## Transport abuse limits (RT-01, RT-02, RT-05)
+
+Both reference shells admit at most 256 connections globally and eight per peer,
+including handshakes, before cloning sockets or starting workers. IPv4-mapped
+IPv6 addresses share the IPv4 budget; native IPv6 addresses share a /64 budget.
+A watchdog shuts down stalled sockets every 250 ms: the first complete valid
+application message must arrive within five seconds of acceptance, and subsequent
+valid messages within 30 seconds. Partial reads and WebSocket control frames do
+not extend these deadlines. Clients waiting for a human decision must send a
+protocol ping within 30 seconds. Writes have a two-second socket timeout and a two-second absolute deadline
+for each TCP frame or WebSocket write/flush cycle. Failed writes close the connection.
+
+A separate transport budget admits 480 units per peer per 60-second window.
+Acceptance, each nonempty socket read, and each application message attempt
+consume units before recognition. WebSocket control/text messages also consume
+units. This deliberately charges fragmented input more than a single read.
+Exhaustion closes/refuses connections. Budgets survive disconnects and the peer
+table is capped at 4,096 entries, refusing new peers while full; the existing
+semantic operation limiter still applies. Three invalid messages close a
+connection. WebSocket outbound queues hold at most 16 messages; overflow detaches
+the sender and closes the worker after queued output is flushed or times out.
+
+Connection events use `relay_connection outcome=accepted|rejected|closed active=N`.
+Count outcomes and sample `active` as a gauge; do not label metrics with peer
+addresses. The transport table temporarily retains canonical peer addresses in
+memory for admission; it does not log or persist them. Monitor connection
+rejections alongside mailbox/queue saturation. Drain process stderr continuously.
+
+WebSocket upgrades reject all origins by default. Repeat `--allow-origin ORIGIN`
+to permit exact canonical origins, for example `--allow-origin https://pair.example`.
+Origins include the scheme and non-default port, without a path or trailing slash.
+`null`, duplicate Origin headers, alternate ports and case variants are refused.
+For native clients behind a separately authenticated edge, explicitly use
+`--allow-missing-origin`; this permits only absent Origin headers and does not
+permit hostile supplied origins. Apply the same origin allowlist at the proxy.
+The immediate TCP peer is the budget identity; provision proxy limits per actual
+client as well, since these shells do not trust forwarded-address headers.
+
+## v1 retention rollback (RT-03)
+
+New v1 allocations again accept only 60–600 seconds. Requests above 600 seconds
+are rejected by both recognition and mailbox construction. Credential/v2 keeps
+its distinct fixed 900-second lifetime. Longer v1 leases must not be re-enabled
+until concurrent mailbox, retained-byte and expiry-weighted lease quotas have
+been reviewed. Global capacity and rate limits still apply; allocation remains
+for conformance only.
+
+Existing persisted mailboxes retain their original expiry when upgraded. Before
+starting allocation on a store created by the 24-hour version, use the documented
+`--emergency-close --store-dir DIR` maintenance operation with allocation disabled,
+or wait for those leases to expire. The upgrade does not silently rewrite live
+mailbox expiry. Capacity planning must allow up to 24 hours during that transition.

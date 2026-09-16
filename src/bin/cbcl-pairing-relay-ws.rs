@@ -4,6 +4,9 @@
 //! server message. TLS remains an operator boundary; bind this process to a
 //! private address behind authenticated WSS termination.
 
+mod common;
+use common::{Admission, BudgetStream};
+
 use cbcl_pairing::{
     limiter::{LimiterConfig, OperationPolicy},
     observability::CapacityCaps,
@@ -16,18 +19,18 @@ use cbcl_pairing::{
 use std::{
     collections::BTreeMap,
     env, fs,
-    net::{SocketAddr, TcpListener, TcpStream},
+    net::{SocketAddr, TcpListener},
     path::{Path, PathBuf},
     process::ExitCode,
     sync::{
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver, Sender, TryRecvError},
+        mpsc::{self, Receiver, SyncSender, TryRecvError},
         Arc, Mutex,
     },
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tungstenite::{accept_with_config, Message, WebSocket};
+use tungstenite::{accept_hdr_with_config, Message, WebSocket};
 
 const MAX_WIRE_MESSAGE: usize = 70_000;
 const DEFAULT_LIMIT: u32 = 240;
@@ -44,9 +47,11 @@ struct Args {
     conformance_allocation: bool,
     check_config: bool,
     emergency_close: bool,
+    allowed_origins: Vec<String>,
+    allow_missing_origin: bool,
 }
 
-type Senders = Arc<Mutex<BTreeMap<ConnectionId, Sender<ServerMessage>>>>;
+type Senders = Arc<Mutex<BTreeMap<ConnectionId, SyncSender<ServerMessage>>>>;
 
 fn main() -> ExitCode {
     match run() {
@@ -108,6 +113,7 @@ fn run() -> Result<(), String> {
     let service = Arc::new(Mutex::new(service));
     let senders: Senders = Arc::new(Mutex::new(BTreeMap::new()));
     spawn_sweeper(Arc::clone(&service), Arc::clone(&senders));
+    let admission = Admission::new();
     let next_connection = AtomicU64::new(1);
     for stream in listener.incoming() {
         let stream = match stream {
@@ -117,47 +123,89 @@ fn run() -> Result<(), String> {
                 continue;
             }
         };
+        let Ok(stream) = admission.admit(stream) else {
+            continue;
+        };
         let connection = ConnectionId(next_connection.fetch_add(1, Ordering::Relaxed));
         let service = Arc::clone(&service);
         let senders = Arc::clone(&senders);
-        thread::spawn(move || serve_connection(stream, connection, service, senders));
+        let origins = args.allowed_origins.clone();
+        let allow_missing = args.allow_missing_origin;
+        let _ = thread::Builder::new().spawn(move || {
+            serve_connection(stream, connection, service, senders, origins, allow_missing)
+        });
     }
     Ok(())
 }
 
+// tungstenite fixes the callback error type to an HTTP response.
+#[allow(clippy::result_large_err)]
 fn serve_connection(
-    stream: TcpStream,
+    stream: BudgetStream,
     connection: ConnectionId,
     service: Arc<Mutex<RelayService>>,
     senders: Senders,
+    origins: Vec<String>,
+    allow_missing: bool,
 ) {
     let peer = stream
+        .stream
         .peer_addr()
         .map(|address| address.ip().to_string().into_bytes())
         .unwrap_or_else(|_| b"unknown-peer".to_vec());
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut config = tungstenite::protocol::WebSocketConfig::default();
     config.max_message_size = Some(MAX_WIRE_MESSAGE);
     config.max_frame_size = Some(MAX_WIRE_MESSAGE);
-    let Ok(mut websocket) = accept_with_config(stream, Some(config)) else {
+    let Ok(mut websocket) = accept_hdr_with_config(
+        stream,
+        |request: &tungstenite::handshake::server::Request, response| {
+            let values = request.headers().get_all("origin");
+            let mut values = values.iter();
+            let accepted = match values.next() {
+                None => allow_missing,
+                Some(value) => {
+                    values.next().is_none()
+                        && value
+                            .to_str()
+                            .ok()
+                            .is_some_and(|origin| origins.iter().any(|allowed| allowed == origin))
+                }
+            };
+            if accepted {
+                Ok(response)
+            } else {
+                Err(tungstenite::http::Response::builder()
+                    .status(403)
+                    .body(Some("Origin refused".into()))
+                    .expect("fixed response"))
+            }
+        },
+        Some(config),
+    ) else {
         return;
     };
     let _ = websocket
         .get_mut()
+        .stream
         .set_read_timeout(Some(Duration::from_millis(100)));
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(16);
     if let Ok(mut table) = senders.lock() {
         table.insert(connection, sender);
     } else {
         return;
     }
 
+    let mut invalid = 0;
     loop {
         if !flush_outbound(&mut websocket, &receiver) {
             break;
         }
         match websocket.read() {
             Ok(Message::Binary(bytes)) => {
+                if websocket.get_ref().charge().is_err() {
+                    break;
+                }
                 let message = match decode_client_message(&bytes) {
                     Ok(message) => message,
                     Err(_) => {
@@ -168,9 +216,14 @@ fn serve_connection(
                                 message: ServerMessage::Error(400),
                             }],
                         );
+                        invalid += 1;
+                        if invalid >= 3 {
+                            break;
+                        }
                         continue;
                     }
                 };
+                websocket.get_ref().progress();
                 let randomness = match random_values() {
                     Ok(randomness) => randomness,
                     Err(()) => {
@@ -209,15 +262,28 @@ fn serve_connection(
                 dispatch(&senders, expired);
                 dispatch(&senders, replies);
             }
-            Ok(Message::Text(_)) => dispatch(
-                &senders,
-                vec![RoutedMessage {
-                    connection,
-                    message: ServerMessage::Error(400),
-                }],
-            ),
+            Ok(Message::Text(_)) => {
+                if websocket.get_ref().charge().is_err() {
+                    break;
+                }
+                invalid += 1;
+                dispatch(
+                    &senders,
+                    vec![RoutedMessage {
+                        connection,
+                        message: ServerMessage::Error(400),
+                    }],
+                );
+                if invalid >= 3 {
+                    break;
+                }
+            }
             Ok(Message::Close(_)) => break,
-            Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
+            Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {
+                if websocket.get_ref().charge().is_err() {
+                    break;
+                }
+            }
             Err(tungstenite::Error::Io(error))
                 if matches!(
                     error.kind(),
@@ -243,7 +309,7 @@ fn serve_connection(
 }
 
 fn flush_outbound(
-    websocket: &mut WebSocket<TcpStream>,
+    websocket: &mut WebSocket<BudgetStream>,
     receiver: &Receiver<ServerMessage>,
 ) -> bool {
     loop {
@@ -263,10 +329,14 @@ fn flush_outbound(
 }
 
 fn dispatch(senders: &Senders, messages: Vec<RoutedMessage>) {
-    let Ok(table) = senders.lock() else { return };
+    let Ok(mut table) = senders.lock() else {
+        return;
+    };
     for routed in messages {
         if let Some(sender) = table.get(&routed.connection) {
-            let _ = sender.send(routed.message);
+            if sender.try_send(routed.message).is_err() {
+                table.remove(&routed.connection);
+            }
         }
     }
 }
@@ -289,16 +359,27 @@ fn parse_args() -> Result<Args, String> {
     let mut conformance_allocation = false;
     let mut check_config = false;
     let mut emergency_close = false;
+    let mut allowed_origins = Vec::new();
+    let mut allow_missing_origin = false;
     let mut args = env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--allow-origin" => {
+                let origin = args.next().ok_or("--allow-origin requires an origin")?;
+                let parsed = url::Url::parse(&origin).map_err(|_| "invalid origin")?;
+                if !matches!(parsed.scheme(), "http" | "https") || parsed.origin().ascii_serialization() != origin {
+                    return Err("origin must be canonical http(s) scheme://host[:port]".into());
+                }
+                allowed_origins.push(origin);
+            }
+            "--allow-missing-origin" => allow_missing_origin = true,
             "--listen" => listen = Some(args.next().ok_or("--listen requires an address")?.parse().map_err(|_| "invalid --listen address")?),
             "--operator-key-file" => operator_key_file = Some(PathBuf::from(args.next().ok_or("--operator-key-file requires a path")?)),
             "--store-dir" => store_dir = Some(PathBuf::from(args.next().ok_or("--store-dir requires a path")?)),
             "--enable-conformance-allocation" => conformance_allocation = true,
             "--check-config" => check_config = true,
             "--emergency-close" => emergency_close = true,
-            "--help" | "-h" => return Err("usage: cbcl-pairing-relay-ws --listen ADDR --operator-key-file PATH [--store-dir DIR] [--enable-conformance-allocation] [--check-config] [--emergency-close]".into()),
+            "--help" | "-h" => return Err("usage: cbcl-pairing-relay-ws --listen ADDR --operator-key-file PATH [--store-dir DIR] [--enable-conformance-allocation] [--check-config] [--emergency-close] [--allow-origin ORIGIN] [--allow-missing-origin]".into()),
             _ => return Err(format!("unknown argument: {argument}")),
         }
     }
@@ -309,6 +390,8 @@ fn parse_args() -> Result<Args, String> {
         conformance_allocation,
         check_config,
         emergency_close,
+        allowed_origins,
+        allow_missing_origin,
     })
 }
 

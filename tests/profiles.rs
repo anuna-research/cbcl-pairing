@@ -177,17 +177,25 @@ fn test_010_profiles_are_endpoint_local_and_describe_their_carriers() {
 
 #[test]
 fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
-    // Baseline includes a4f48c0 (short nameplate helper) and b03cef4 (v1 TTL
-    // extension). These are shared relay changes, not profile-specific assets.
+    // Baseline includes the September 2026 red-team transport hardening and
+    // v1 TTL rollback. These are shared relay changes, not profile-specific assets.
     // Keep literal pins so subsequent asset changes still require review.
     for (bytes, expected) in [
+        (
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/bin/common/mod.rs"
+            ))
+            .as_slice(),
+            "7f150b75dce3fb29c28227375ad5183c00e464845c19eff23757d3b6d6e06cb5",
+        ),
         (
             include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/src/bin/cbcl-pairing-relay.rs"
             ))
             .as_slice(),
-            "c711f24f19f2e76da03493e478274cfdc50a9431c53520056e0fb42ff8951562",
+            "f032c327d609e9cd5882f6aec5990de7b546ed3a95a604e3c0e8fc04fcb5f5fe",
         ),
         (
             include_bytes!(concat!(
@@ -195,7 +203,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/src/bin/cbcl-pairing-relay-ws.rs"
             ))
             .as_slice(),
-            "9fbcf0fe4d2281f4a7c147080996045033204a74fe5b5e79bc9a6f7e69416ed0",
+            "108c46269e209f06ecc118ad4f2bcd19cf881d92122f273f549546c604467685",
         ),
         (
             include_bytes!(concat!(
@@ -203,11 +211,11 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
                 "/schemas/pairing-v1.cddl"
             ))
             .as_slice(),
-            "0dc60fe2c29a7e4fc967b2f875222984e4cdefcb57988c5ec5b163384a3b5964",
+            "8d676f35c8a9fe67cd96efe3e6a79ec9e0dfcc23211beed0776fdd4716491d8f",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/mailbox.rs")).as_slice(),
-            "aea4e928c826fef1e745ebe465355aca50a974b8d0c27c065133aac9e01bd0f1",
+            "16ee405208f8e7f5fd7b5218620c1a57163172f53fc9dfd05d7e2984ca784bf8",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/storage.rs")).as_slice(),

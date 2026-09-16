@@ -24,6 +24,10 @@ struct RelayProcess {
 
 impl RelayProcess {
     fn start() -> Self {
+        Self::start_policy(true)
+    }
+
+    fn start_policy(allow_missing: bool) -> Self {
         let key_file = std::env::temp_dir().join(format!(
             "cbcl-pairing-ws-test-{}-{}.key",
             std::process::id(),
@@ -42,7 +46,14 @@ impl RelayProcess {
                 "--operator-key-file",
                 key_file.to_str().unwrap(),
                 "--enable-conformance-allocation",
+                "--allow-origin",
+                "https://approved.example",
             ])
+            .args(if allow_missing {
+                vec!["--allow-missing-origin"]
+            } else {
+                vec![]
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -177,4 +188,78 @@ fn test_027_oversize_websocket_message_returns_413_before_close() {
         .expect("send oversize message");
     assert_eq!(receive(&mut websocket), ServerMessage::Error(413));
     let _ = process.stop();
+}
+
+#[test]
+fn websocket_origin_policy_requires_exact_allowlist_match() {
+    use tungstenite::client::IntoClientRequest;
+    let process = RelayProcess::start();
+    for origin in [
+        "https://hostile.example",
+        "null",
+        "https://approved.example:444",
+        "https://APPROVED.example",
+    ] {
+        let mut request = process.address.as_str().into_client_request().unwrap();
+        request
+            .headers_mut()
+            .insert("Origin", origin.parse().unwrap());
+        assert!(
+            matches!(connect(request), Err(tungstenite::Error::Http(response)) if response.status() == 403)
+        );
+    }
+    let mut request = process.address.as_str().into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("Origin", "https://approved.example".parse().unwrap());
+    let (mut socket, _) = connect(request).unwrap();
+    send(&mut socket, &ClientMessage::Bind);
+    assert_eq!(receive(&mut socket), ServerMessage::Welcome);
+}
+
+#[test]
+fn malformed_websocket_messages_close_after_three_attempts() {
+    let process = RelayProcess::start();
+    let (mut socket, _) = connect(&process.address).unwrap();
+    for _ in 0..2 {
+        socket.send(Message::Binary(vec![0xff].into())).unwrap();
+        assert_eq!(receive(&mut socket), ServerMessage::Error(400));
+    }
+    socket.send(Message::Text("invalid".into())).unwrap();
+    assert!(socket.read().is_err());
+}
+
+#[test]
+fn idle_websocket_releases_its_connection() {
+    let process = RelayProcess::start();
+    let (mut socket, _) = connect(&process.address).unwrap();
+    send(&mut socket, &ClientMessage::Bind);
+    assert_eq!(receive(&mut socket), ServerMessage::Welcome);
+    if let tungstenite::stream::MaybeTlsStream::Plain(stream) = socket.get_mut() {
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(33)))
+            .unwrap();
+    }
+    let started = std::time::Instant::now();
+    assert!(socket.read().is_err());
+    assert!(started.elapsed() < std::time::Duration::from_secs(32));
+}
+
+#[test]
+fn websocket_default_refuses_missing_origin_and_stalled_upgrade_expires() {
+    let process = RelayProcess::start_policy(false);
+    assert!(
+        matches!(connect(&process.address), Err(tungstenite::Error::Http(response)) if response.status() == 403)
+    );
+    let address = process
+        .address
+        .strip_prefix("ws://")
+        .unwrap()
+        .trim_end_matches('/');
+    let mut stream = std::net::TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(7)))
+        .unwrap();
+    let mut bytes = Vec::new();
+    stream.read_to_end(&mut bytes).unwrap();
 }

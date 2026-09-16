@@ -205,6 +205,9 @@ pub fn encode_carrier(carrier: &CredentialV2Carrier) -> Result<Vec<u8>, Credenti
 
 /// Recognise one complete deterministic credential/v2 carrier.
 pub fn decode_carrier(input: &[u8]) -> Result<CredentialV2Carrier, CredentialV2Error> {
+    if input.len() > 8192 {
+        return Err(CredentialV2Error::Size);
+    }
     let value = decode_canonical(input)?;
     let entries = map_entries(&value)?;
     let expected_len = if optional_field(entries, "expected-allocator-key").is_some() {

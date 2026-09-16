@@ -116,6 +116,9 @@ impl fmt::Display for CredentialV2Error {
 impl std::error::Error for CredentialV2Error {}
 
 fn decode_canonical(input: &[u8]) -> Result<Value, CredentialV2Error> {
+    if input.len() > 70_000 {
+        return Err(CredentialV2Error::Size);
+    }
     let mut cursor = Cursor::new(input);
     let value: Value =
         ciborium::de::from_reader(&mut cursor).map_err(|_| CredentialV2Error::MalformedCbor)?;
@@ -230,5 +233,22 @@ fn side(value: &Value) -> Result<crate::wire::Side, CredentialV2Error> {
         0 => Ok(crate::wire::Side::Allocator),
         1 => Ok(crate::wire::Side::Claimant),
         _ => Err(CredentialV2Error::Schema),
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+    #[test]
+    fn outer_size_guard_precedes_parsing_for_all_shared_paths() {
+        let input = vec![0xff; 70_001];
+        assert_eq!(decode_canonical(&input), Err(CredentialV2Error::Size));
+        assert_eq!(decode_carrier(&input[..8193]), Err(CredentialV2Error::Size));
+        assert_eq!(
+            CredentialV2AccountSelect::decode(&input[..4097]),
+            Err(CredentialV2Error::Size)
+        );
+        assert_eq!(decode_frame(&input), Err(CredentialV2Error::Size));
+        assert_eq!(decode_object(&input), Err(CredentialV2Error::Size));
     }
 }

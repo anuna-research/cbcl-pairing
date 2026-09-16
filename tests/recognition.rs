@@ -328,7 +328,7 @@ fn test_005_rejects_numeric_and_body_boundaries() {
     let lifetime_86401 = map(vec![
         ("type", text("allocate")),
         ("locator-mode", uint(1)),
-        ("ttl-seconds", uint(86_401)),
+        ("ttl-seconds", uint(601)),
     ]);
     assert_eq!(
         decode_client_message(&encode(&lifetime_86401)),
@@ -522,8 +522,8 @@ fn test_005_all_typed_values_roundtrip_to_identical_deterministic_bytes() {
 }
 
 #[test]
-fn extended_v1_allocation_lifetimes_round_trip() {
-    for seconds in [600, 601, 3600, 65_536, 86_400] {
+fn v1_allocation_lifetimes_round_trip() {
+    for seconds in [60, 300, 600] {
         let command = cbcl_pairing::wire::ClientMessage::Allocate {
             locator_mode: 1,
             ttl_seconds: Some(seconds),
@@ -531,4 +531,35 @@ fn extended_v1_allocation_lifetimes_round_trip() {
         let bytes = cbcl_pairing::wire::encode_client_message(&command).unwrap();
         assert_eq!(decode_client_message(&bytes).unwrap(), command);
     }
+}
+
+#[test]
+fn outer_limits_precede_cbor_parsing() {
+    use cbcl_pairing::wire::*;
+    // Invalid CBOR would return MalformedCbor if parsing ran first.
+    let large = vec![0xff; 70_001];
+    assert_eq!(decode_client_message(&large), Err(RecognitionError::Size));
+    assert_eq!(decode_server_message(&large), Err(RecognitionError::Size));
+    assert_eq!(decode_channel_frame(&large), Err(RecognitionError::Size));
+    assert_eq!(decode_sealed_plaintext(&large), Err(RecognitionError::Size));
+    assert_eq!(
+        decode_application_payload(&large),
+        Err(RecognitionError::Size)
+    );
+    assert_eq!(
+        decode_invitation(&large[..1025]),
+        Err(RecognitionError::Size)
+    );
+    assert_eq!(
+        decode_cpace_message(&large[..257]),
+        Err(RecognitionError::Size)
+    );
+    assert_eq!(
+        decode_pairing_decision(&large[..257]),
+        Err(RecognitionError::Size)
+    );
+    assert_eq!(
+        decode_pairing_intent(&large[..18_001]),
+        Err(RecognitionError::Size)
+    );
 }

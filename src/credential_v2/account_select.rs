@@ -92,6 +92,9 @@ impl CredentialV2AccountSelect {
 
     /// Recognise one complete canonical body.
     pub fn decode(body: &[u8]) -> Result<Self, CredentialV2Error> {
+        if body.len() > 4096 {
+            return Err(CredentialV2Error::Size);
+        }
         let value = decode_canonical(body)?;
         let Value::Array(members) = &value else {
             return Err(CredentialV2Error::Schema);

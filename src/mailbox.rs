@@ -9,7 +9,7 @@ pub const DEFAULT_TTL_SECONDS: u32 = 600;
 /// Minimum accepted mailbox lifetime in seconds.
 pub const MIN_TTL_SECONDS: u32 = 60;
 /// Maximum accepted mailbox lifetime in seconds.
-pub const MAX_TTL_SECONDS: u32 = 86_400;
+pub const MAX_TTL_SECONDS: u32 = 600;
 /// Exact protected credential/v2 mailbox lifetime in seconds.
 pub const V2_TTL_SECONDS: u16 = 900;
 /// Maximum frames accepted from one membership.
@@ -270,7 +270,7 @@ pub struct MailboxTransition {
 /// Closed error set for mailbox-domain validation failures.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MailboxError {
-    /// Requested lifetime falls outside 60 through 86,400 seconds.
+    /// Requested lifetime falls outside 60 through 600 seconds.
     LifetimeOutOfRange,
     /// Absolute expiry cannot be represented.
     ExpiryOverflow,

@@ -4,6 +4,9 @@
 //! for local tests while the human cryptography and interoperability gates are
 //! open. A deployment terminates TLS/WSS in front of this private listener.
 
+mod common;
+use common::{Admission, BudgetStream};
+
 use cbcl_pairing::{
     limiter::{LimiterConfig, OperationPolicy},
     observability::CapacityCaps,
@@ -108,6 +111,7 @@ fn run() -> Result<(), String> {
     let service = Arc::new(Mutex::new(service));
     let writers: Writers = Arc::new(Mutex::new(BTreeMap::new()));
     spawn_sweeper(Arc::clone(&service), Arc::clone(&writers));
+    let admission = Admission::new();
     let next_connection = AtomicU64::new(1);
     for stream in listener.incoming() {
         let stream = match stream {
@@ -117,19 +121,34 @@ fn run() -> Result<(), String> {
                 continue;
             }
         };
+        let Ok(stream) = admission.admit(stream) else {
+            continue;
+        };
         let connection = ConnectionId(next_connection.fetch_add(1, Ordering::Relaxed));
         let peer = stream
+            .stream
             .peer_addr()
             .map(|address| address.ip().to_string().into_bytes())
             .unwrap_or_else(|_| b"unknown-peer".to_vec());
-        let writer = stream.try_clone().map_err(|error| error.to_string())?;
+        let writer = stream
+            .stream
+            .try_clone()
+            .map_err(|error| error.to_string())?;
         writers
             .lock()
             .map_err(|_| "writer lock poisoned".to_owned())?
             .insert(connection, Arc::new(Mutex::new(writer)));
         let service = Arc::clone(&service);
         let writers = Arc::clone(&writers);
-        thread::spawn(move || serve_connection(stream, connection, peer, service, writers));
+        let cleanup = Arc::clone(&writers);
+        if thread::Builder::new()
+            .spawn(move || serve_connection(stream, connection, peer, service, writers))
+            .is_err()
+        {
+            if let Ok(mut table) = cleanup.lock() {
+                table.remove(&connection);
+            }
+        }
     }
     Ok(())
 }
@@ -219,13 +238,17 @@ fn hex_nibble(value: u8) -> Result<u8, String> {
 }
 
 fn serve_connection(
-    mut reader: TcpStream,
+    mut reader: BudgetStream,
     connection: ConnectionId,
     peer: Vec<u8>,
     service: Arc<Mutex<RelayService>>,
     writers: Writers,
 ) {
+    let mut invalid = 0;
     loop {
+        if reader.charge().is_err() {
+            break;
+        }
         let bytes = match read_message(&mut reader) {
             Ok(Some(value)) => value,
             Ok(None) => break,
@@ -250,9 +273,17 @@ fn serve_connection(
                         message: ServerMessage::Error(400),
                     },
                 );
+                invalid += 1;
+                if invalid >= 3 {
+                    break;
+                }
                 continue;
             }
         };
+        reader.progress();
+        let _ = reader
+            .stream
+            .set_read_timeout(Some(Duration::from_secs(30)));
         let now = unix_time();
         let randomness = match random_values() {
             Ok(value) => value,
@@ -312,7 +343,7 @@ fn spawn_sweeper(service: Arc<Mutex<RelayService>>, writers: Writers) {
     });
 }
 
-fn read_message(stream: &mut TcpStream) -> io::Result<Option<Vec<u8>>> {
+fn read_message(stream: &mut BudgetStream) -> io::Result<Option<Vec<u8>>> {
     let mut length = [0_u8; 4];
     match stream.read_exact(&mut length) {
         Ok(()) => {}
@@ -349,9 +380,28 @@ fn send_one(writers: &Writers, routed: RoutedMessage) {
         return;
     };
     if let Ok(mut writer) = writer.lock() {
-        let _ = writer.write_all(&(bytes.len() as u32).to_be_bytes());
-        let _ = writer.write_all(&bytes);
-        let _ = writer.flush();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut frame = (bytes.len() as u32).to_be_bytes().to_vec();
+        frame.extend_from_slice(&bytes);
+        let mut remaining = frame.as_slice();
+        let result = (|| -> io::Result<()> {
+            while !remaining.is_empty() {
+                let timeout = deadline
+                    .checked_duration_since(std::time::Instant::now())
+                    .filter(|value| !value.is_zero())
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "write deadline"))?;
+                writer.set_write_timeout(Some(timeout))?;
+                let count = writer.write(remaining)?;
+                if count == 0 {
+                    return Err(io::ErrorKind::WriteZero.into());
+                }
+                remaining = &remaining[count..];
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = writer.shutdown(std::net::Shutdown::Both);
+        }
     };
 }
 

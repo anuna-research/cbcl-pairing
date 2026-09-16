@@ -327,6 +327,8 @@ pub struct ApplicationPayload {
 /// Trust-boundary recognition or deterministic-encoding failure.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RecognitionError {
+    /// Input exceeds the decoder's outer byte limit.
+    Size,
     /// Input is not one complete well-formed CBOR value.
     MalformedCbor,
     /// Extra octets follow the recognised value.
@@ -393,6 +395,15 @@ fn has_duplicate_key(value: &Value) -> Result<bool, RecognitionError> {
 }
 
 fn recognise_value(input: &[u8], rule: &str) -> Result<Value, RecognitionError> {
+    let maximum = match rule {
+        "pairing-invitation" => 1024,
+        "cpace-message" | "pairing-decision" => 256,
+        "pairing-intent" => 18_000,
+        _ => 70_000,
+    };
+    if input.len() > maximum {
+        return Err(RecognitionError::Size);
+    }
     let mut cursor = Cursor::new(input);
     let value: Value =
         ciborium::from_reader(&mut cursor).map_err(|_| RecognitionError::MalformedCbor)?;

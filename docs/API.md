@@ -151,3 +151,22 @@ already-emitted `CloseMailbox`, and never retry with the same invitation unless
 `Debug` implementations redact secret-bearing types, but debug redaction is not
 a substitute for avoiding secret copies in application logs, crashes, metrics,
 or persistence.
+
+### Outer CBOR limits
+
+Public wire decoders reject oversized slices with `RecognitionError::Size`
+**before** generic CBOR deserialization, canonicalization or schema validation:
+
+| Decoder | Maximum input octets |
+| --- | ---: |
+| Invitation | 1,024 |
+| CPace message, pairing decision | 256 |
+| Pairing intent | 18,000 |
+| Client/server message, channel frame, sealed plaintext, application payload | 70,000 |
+
+Credential/v2's shared canonical decoder rejects input above 70,000 octets with
+`CredentialV2Error::Size`, including frame, object and checkpoint paths. Carrier
+recognition has an 8,192-octet outer limit; account-selection body recognition has
+a 4,096-octet limit. Existing typed field bounds still apply within these limits.
+Embedders must also bound transport buffering, concurrent calls and request rates;
+the decoder limits bound individual input size, not aggregate workload.

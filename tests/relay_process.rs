@@ -698,3 +698,69 @@ fn test_017_two_isolated_relay_processes_complete_both_profiles_identically() {
         }
     }
 }
+
+#[test]
+fn connection_cap_and_absolute_first_message_deadline_release_stalled_clients() {
+    let process = RelayProcess::start(201);
+    let mut stalled = Vec::new();
+    for index in 0..8 {
+        let mut stream = TcpStream::connect(&process.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(8)))
+            .unwrap();
+        // No prefix, a partial prefix, or a partial body all retain the same deadline.
+        match index % 3 {
+            1 => stream.write_all(&[0, 0]).unwrap(),
+            2 => stream.write_all(&[0, 0, 0, 20, 0xa1]).unwrap(),
+            _ => {}
+        }
+        stalled.push(stream);
+    }
+    std::thread::sleep(Duration::from_millis(150));
+    let mut excess = TcpStream::connect(&process.address).unwrap();
+    excess
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut byte = [0];
+    assert!(matches!(excess.read(&mut byte), Ok(0)));
+    for mut stream in stalled {
+        let mut bytes = Vec::new();
+        match stream.read_to_end(&mut bytes) {
+            Ok(_) => {}
+            Err(error) => assert!(matches!(error.kind(), std::io::ErrorKind::ConnectionReset)),
+        }
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let mut stream = TcpStream::connect(&process.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let bind = encode_client_message(&ClientMessage::Bind).unwrap();
+    stream
+        .write_all(&(bind.len() as u32).to_be_bytes())
+        .unwrap();
+    stream.write_all(&bind).unwrap();
+    let mut prefix = [0; 4];
+    stream.read_exact(&mut prefix).unwrap();
+    let mut response = vec![0; u32::from_be_bytes(prefix) as usize];
+    stream.read_exact(&mut response).unwrap();
+    assert_eq!(
+        decode_server_message(&response).unwrap(),
+        ServerMessage::Welcome
+    );
+}
+
+#[test]
+fn malformed_tcp_messages_exhaust_connection_budget() {
+    let process = RelayProcess::start(202);
+    let mut stream = TcpStream::connect(&process.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    for _ in 0..3 {
+        stream.write_all(&[0, 0, 0, 1, 0xff]).unwrap();
+    }
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).unwrap();
+    assert!(!response.is_empty());
+}
