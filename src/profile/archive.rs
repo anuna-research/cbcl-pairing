@@ -219,5 +219,9 @@ fn fixed(fields: &[(Value, Value)], name: &str, e: ProfileError) -> Result<[u8; 
     bytes_field(fields, name, 32, e)?.try_into().map_err(|_| e)
 }
 fn hex_key(key: &[u8; 32]) -> String {
-    key.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+    key.iter().fold(String::with_capacity(64), |mut hex, b| {
+        let _ = write!(hex, "{b:02x}");
+        hex
+    })
 }
