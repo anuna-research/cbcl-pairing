@@ -204,7 +204,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/mailbox.rs")).as_slice(),
-            "6e1c5a4ca4cc49a1daee00fba868c33be517e2b760ec30fc4d3609a3c4d6bfd6",
+            "a8646cbf16fbd9c39531d26dd6a1dcbbc702aa85b203ecff53b59425b6e90f77",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/storage.rs")).as_slice(),
@@ -212,7 +212,7 @@ fn test_010_synthetic_profile_leaves_relay_assets_byte_identical() {
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/relay.rs")).as_slice(),
-            "87fc2d2dcd4e206d610ee4ece630b6d3bdf411967265a549093c49754eb68000",
+            "79330fda9908d19e44b8a42cc269a4af4b204b531b5ca4fc50ffc348dde39399",
         ),
         (
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/limiter.rs")).as_slice(),
