@@ -113,7 +113,7 @@ dependencies = [
 [[package]]
 name = "cbcl-core"
 version = "0.1.0"
-source = "git+https://codeberg.org/anuna/cbcl-rs?rev=febc6691e6dd2d5f7116b1a4d84c984b64717564#febc6691e6dd2d5f7116b1a4d84c984b64717564"
+source = "git+https://git.anuna.io/anuna-research/cbcl-rs?rev=58dbcfcfb286a97a9e1ea076c19d401bf15be918#58dbcfcfb286a97a9e1ea076c19d401bf15be918"
 dependencies = [
  "hashbrown",
  "sha2 0.10.9",
@@ -153,7 +153,7 @@ dependencies = [
 [[package]]
 name = "cbcl-parser"
 version = "0.1.0"
-source = "git+https://codeberg.org/anuna/cbcl-rs?rev=febc6691e6dd2d5f7116b1a4d84c984b64717564#febc6691e6dd2d5f7116b1a4d84c984b64717564"
+source = "git+https://git.anuna.io/anuna-research/cbcl-rs?rev=58dbcfcfb286a97a9e1ea076c19d401bf15be918#58dbcfcfb286a97a9e1ea076c19d401bf15be918"
 dependencies = [
  "cbcl-core",
 ]

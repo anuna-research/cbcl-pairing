@@ -48,4 +48,4 @@ skip = [
 unknown-registry = "deny"
 unknown-git = "deny"
 required-git-spec = "rev"
-allow-git = ["https://codeberg.org/anuna/cbcl-rs"]
+allow-git = ["https://git.anuna.io/anuna-research/cbcl-rs"]
